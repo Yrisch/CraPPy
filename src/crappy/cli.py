@@ -1,4 +1,4 @@
-"""Command line: crappy info | build | preview."""
+"""Command line: crappy info | build | preview | play."""
 
 from __future__ import annotations
 
@@ -49,6 +49,26 @@ def cmd_preview(args) -> int:
     return 0
 
 
+def cmd_play(args) -> int:
+    from crappy.player.app import run, screens_summary
+    if args.list_screens:
+        print("\n".join(screens_summary()))
+        return 0
+    if args.talk is None:
+        print("error: give a .odp or a manifest.json", file=sys.stderr)
+        return 2
+    talk = Path(args.talk)
+    if talk.suffix == ".odp":
+        out = Path(args.output or default_output_dir(talk.resolve()))
+        build(talk, out, args.size, args.jobs)
+        manifest = out / "manifest.json"
+    elif talk.is_dir():
+        manifest = talk / "manifest.json"
+    else:
+        manifest = talk
+    return run(manifest, args.screen, args.windowed, args.start, args.software)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="crappy", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -68,6 +88,19 @@ def main(argv: list[str] | None = None) -> int:
         if name == "build":
             p.add_argument("--keep-work", action="store_true", help="keep intermediate .odp/.pdf files")
         p.set_defaults(func=func)
+
+    p = sub.add_parser("play", help="show the talk (builds it first when given the .odp)")
+    p.add_argument("talk", nargs="?", help="talk.odp, its .crappy folder, or a manifest.json")
+    p.add_argument("-s", "--screen", type=int, help="screen number (see --list-screens); "
+                   "default: a non-primary screen if there is one")
+    p.add_argument("--list-screens", action="store_true", help="list screens and exit")
+    p.add_argument("-w", "--windowed", action="store_true", help="in a window instead of fullscreen")
+    p.add_argument("--start", type=int, help="start at this slide number")
+    p.add_argument("--software", action="store_true", help="draw without OpenGL")
+    p.add_argument("-o", "--output", type=Path, help="build folder (default: <talk>.crappy next to the .odp)")
+    p.add_argument("--size", type=_size, default=(1920, 1080), help="build size WIDTHxHEIGHT (default 1920x1080)")
+    p.add_argument("-j", "--jobs", type=int, help="parallel LibreOffice instances for the build")
+    p.set_defaults(func=cmd_play)
 
     args = parser.parse_args(argv)
     try:

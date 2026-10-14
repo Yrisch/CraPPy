@@ -1,0 +1,227 @@
+"""Fullscreen window: keyboard/mouse/clicker input and frame pacing.
+
+Keys
+  next      Right, Down, Page Down, Space, N, Enter, left click, wheel down
+  previous  Left, Up, Page Up, Backspace, P, right click, wheel up
+  1 2 ... Enter    go to slide number
+  Home / End       first / last slide
+  B or .  black screen        W or ,  white screen     (again to come back)
+  F / F11 fullscreen on/off   Esc / Q  quit
+"""
+
+from __future__ import annotations
+
+import time
+
+from PySide6.QtCore import QRectF, Qt, QTimer
+from PySide6.QtGui import QColor, QFont, QKeyEvent, QMouseEvent, QPainter, QWheelEvent
+from PySide6.QtOpenGLWidgets import QOpenGLWidget
+from PySide6.QtWidgets import QWidget
+
+from crappy.player import scene
+from crappy.player.deck import Deck
+from crappy.player.images import SlideImages
+from crappy.player.timeline import Pos, Timeline
+
+K = Qt.Key
+NEXT_KEYS = {K.Key_Right, K.Key_Down, K.Key_PageDown, K.Key_Space, K.Key_N}
+PREV_KEYS = {K.Key_Left, K.Key_Up, K.Key_PageUp, K.Key_Backspace, K.Key_P}
+ENTER_KEYS = {K.Key_Return, K.Key_Enter}
+CURSOR_HIDE_MS = 2000
+
+
+def fit(width: float, height: float, outer: QRectF) -> QRectF:
+    """Largest rectangle of the given aspect ratio centred in `outer` (letterbox)."""
+    scale = min(outer.width() / width, outer.height() / height)
+    w, h = width * scale, height * scale
+    return QRectF(outer.x() + (outer.width() - w) / 2, outer.y() + (outer.height() - h) / 2, w, h)
+
+
+class Controller:
+    """Everything but the widget itself, so the GL and raster views share it."""
+
+    def __init__(self, deck: Deck, start: Pos | None = None, clock=time.monotonic):
+        self.deck = deck
+        self.clock = clock
+        self.timeline = Timeline(deck, start)
+        self.images = SlideImages(deck)
+        self.blank: QColor | None = None
+        self.typed = ""                  # slide number being typed
+        self.request_update = lambda: None
+        self.request_quit = lambda: None
+        self.toggle_fullscreen = lambda: None
+        self._preload()
+
+    def _preload(self) -> None:
+        self.images.keep(self.timeline.neighbours())
+
+    # --- input ---------------------------------------------------------------
+
+    def key(self, key: int, text: str = "") -> bool:
+        now = self.clock()
+        if text.isdigit():
+            self.typed += text
+        elif key in ENTER_KEYS and self.typed:
+            index = self.deck.index_of_number(int(self.typed))
+            self.typed = ""
+            if index is not None:
+                self.blank = None
+                self.timeline.goto(index, now)
+        elif key == K.Key_Escape and self.typed:
+            self.typed = ""
+        elif key == K.Key_Backspace and self.typed:
+            self.typed = self.typed[:-1]
+        elif key in (K.Key_Escape, K.Key_Q):
+            self.request_quit()
+            return True
+        elif key in (K.Key_B, K.Key_Period):
+            self._toggle_blank(QColor("black"))
+        elif key in (K.Key_W, K.Key_Comma):
+            self._toggle_blank(QColor("white"))
+        elif key in (K.Key_F, K.Key_F11):
+            self.toggle_fullscreen()
+        elif key in NEXT_KEYS or key in ENTER_KEYS:
+            self.next()
+        elif key in PREV_KEYS:
+            self.prev()
+        elif key == K.Key_Home:
+            self.blank = None
+            self.timeline.first(now)
+        elif key == K.Key_End:
+            self.blank = None
+            self.timeline.last(now)
+        else:
+            return False
+        self._preload()
+        self.request_update()
+        return True
+
+    def next(self) -> None:
+        if self.blank is not None:          # first key after a blank screen only uncovers it
+            self.blank = None
+        else:
+            self.timeline.next(self.clock())
+        self._preload()
+        self.request_update()
+
+    def prev(self) -> None:
+        if self.blank is not None:
+            self.blank = None
+        else:
+            self.timeline.prev(self.clock())
+        self._preload()
+        self.request_update()
+
+    def _toggle_blank(self, color: QColor) -> None:
+        self.blank = None if self.blank == color else color
+
+    # --- drawing -------------------------------------------------------------
+
+    def paint(self, painter: QPainter, rect: QRectF) -> bool:
+        """Draw one frame; returns True while an animation needs more frames."""
+        now = self.clock()
+        painter.fillRect(rect, QColor("black"))
+        if self.blank is not None:
+            painter.fillRect(rect, self.blank)
+            animating = False
+        else:
+            target = fit(*self.deck.size, rect)
+            current = self.timeline.scene(now)
+            scene.draw(painter, target, current, self.images.get)
+            animating = self.timeline.animating(now)
+            if not animating:
+                self._preload()
+        if self.typed:
+            self._draw_typed(painter, rect)
+        return animating
+
+    def _draw_typed(self, painter: QPainter, rect: QRectF) -> None:
+        font = QFont()
+        font.setPixelSize(max(16, int(rect.height() / 25)))
+        painter.setFont(font)
+        box = QRectF(rect.x() + 20, rect.bottom() - font.pixelSize() * 2 - 20, font.pixelSize() * 8,
+                     font.pixelSize() * 2)
+        painter.fillRect(box, QColor(0, 0, 0, 180))
+        painter.setPen(QColor("white"))
+        painter.drawText(box, Qt.AlignmentFlag.AlignCenter, f"→ {self.typed}")
+
+    def close(self) -> None:
+        self.images.close()
+
+
+class _ViewMixin:
+    """Input plumbing shared by the GL and raster widgets."""
+
+    controller: Controller
+
+    def _setup(self, controller: Controller) -> None:
+        self.controller = controller
+        controller.request_update = self.update
+        controller.request_quit = self.window().close
+        controller.toggle_fullscreen = self._toggle_fullscreen
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setMouseTracking(True)
+        self.setWindowTitle(f"CraPPy — {controller.deck.root.name}")
+        self._cursor_timer = QTimer(self, singleShot=True, interval=CURSOR_HIDE_MS)
+        self._cursor_timer.timeout.connect(lambda: self.setCursor(Qt.CursorShape.BlankCursor))
+        self._cursor_timer.start()
+
+    def _toggle_fullscreen(self) -> None:
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
+
+    def _frame(self, painter: QPainter) -> None:
+        if self.controller.paint(painter, QRectF(self.rect())):
+            self.update()           # next frame; throttled by the display's refresh
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if not self.controller.key(event.key(), event.text()):
+            super().keyPressEvent(event)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.controller.next()
+        elif event.button() == Qt.MouseButton.RightButton:
+            self.controller.prev()
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        self.unsetCursor()
+        self._cursor_timer.start()
+
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        dy = event.angleDelta().y()
+        if dy < 0:
+            self.controller.next()
+        elif dy > 0:
+            self.controller.prev()
+
+    def closeEvent(self, event) -> None:
+        self.controller.close()
+        super().closeEvent(event)
+
+
+class GLView(_ViewMixin, QOpenGLWidget):
+    def __init__(self, controller: Controller):
+        super().__init__()
+        self._setup(controller)
+
+    def paintGL(self) -> None:
+        painter = QPainter(self)
+        self._frame(painter)
+        painter.end()
+
+
+class RasterView(_ViewMixin, QWidget):
+    """Software rendering: for tests, or when OpenGL is unavailable."""
+
+    def __init__(self, controller: Controller):
+        super().__init__()
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)
+        self._setup(controller)
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        self._frame(painter)
+        painter.end()

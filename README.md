@@ -26,9 +26,32 @@ python -m venv .venv && .venv/bin/pip install -e '.[dev]'
 crappy info    talk.odp      # slides, click steps, transitions, warnings (fast)
 crappy build   talk.odp      # -> talk.crappy/ (manifest.json + PNG layers)
 crappy preview talk.odp      # build + talk.crappy/preview/*.png + contact_sheet.png
+crappy play    talk.odp      # build if needed, then show it fullscreen
 ```
 
 The build is cached: it only re-renders when the `.odp` or its side file changes.
+
+## Showing a talk
+
+`crappy play talk.odp` opens fullscreen on a non-primary screen when there is
+one (usually the projector), otherwise on the main screen. Options:
+`--screen N` (see `--list-screens`), `--windowed`, `--start N` (slide number),
+`--software` (no OpenGL).
+
+| Action | Keys / mouse |
+|---|---|
+| next (click step or slide) | → ↓ Page Down Space N Enter, left click, wheel down |
+| previous | ← ↑ Page Up Backspace P, right click, wheel up |
+| go to slide | type its number, then Enter |
+| first / last slide | Home / End |
+| black / white screen | B or `.` / W or `,` (same key to come back) |
+| fullscreen on/off | F or F11 |
+| quit | Esc or Q |
+
+Going back replays transitions in reverse. During a transition, a key in the
+same direction finishes it at once; the opposite direction turns it around.
+Hidden slides are skipped (but reachable by number). The mouse cursor hides
+after 2 s without movement.
 
 ## Writing a talk
 
