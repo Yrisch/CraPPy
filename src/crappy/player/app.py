@@ -44,7 +44,8 @@ def default_screen(screens, primary):
 
 
 def run(manifest: Path, screen: int | None = None, windowed: bool = False, start: int | None = None,
-        software: bool = False) -> int:
+        software: bool = False, presenter: str = "auto", presenter_screen: int | None = None) -> int:
+    """presenter: "auto" (when there is a second screen), "on" or "off"."""
     fmt = QSurfaceFormat.defaultFormat()
     fmt.setSwapInterval(1)              # one frame per display refresh
     QSurfaceFormat.setDefaultFormat(fmt)
@@ -59,7 +60,36 @@ def run(manifest: Path, screen: int | None = None, windowed: bool = False, start
             raise SystemExit(f"error: no slide {start}")
         start_pos = Pos(index, 0)
     controller = Controller(deck, start_pos)
-    view = (RasterView if software else GLView)(controller)
+    audience = (RasterView if software else GLView)(controller)
+    audience_screen = _pick_screen(app, screen)
 
-    view.present(_pick_screen(app, screen), fullscreen=not windowed)
-    return app.exec()
+    others = [s for s in app.screens() if s != audience_screen]
+    if presenter_screen is not None:
+        others = [_pick_screen(app, presenter_screen)]
+    show_presenter = presenter == "on" or (presenter == "auto" and others and not windowed)
+    view = None
+    if show_presenter:
+        from crappy.player.presenter import PresenterView
+        view = PresenterView(controller)
+        # alone on one screen (rehearsal), both views are windows
+        view.present(others[0] if others else audience_screen, fullscreen=bool(others) and not windowed)
+    audience.present(audience_screen, fullscreen=not windowed)
+
+    def next_screen() -> None:
+        screens = app.screens()
+        if view is not None and view.target_screen in screens and view.target_screen != audience.target_screen:
+            # two views on two screens: swap them
+            a, p = audience.target_screen, view.target_screen
+            audience.move_to(p)
+            view.move_to(a)
+            return
+        i = screens.index(audience.target_screen) if audience.target_screen in screens else 0
+        audience.move_to(screens[(i + 1) % len(screens)])
+
+    controller.request_quit = app.quit
+    controller.toggle_fullscreen = audience.toggle_fullscreen
+    controller.next_screen = next_screen
+    try:
+        return app.exec()
+    finally:
+        controller.close()

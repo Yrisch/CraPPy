@@ -36,9 +36,13 @@ The build is cached: it only re-renders when the `.odp` or its side file changes
 
 `crappy play talk.odp` opens fullscreen on an external screen when there is
 one (the projector; with several, one that is not the primary), otherwise on
-the laptop screen. Options:
-`--screen N` (see `--list-screens`), `--windowed`, `--start N` (slide number),
-`--software` (no OpenGL).
+the laptop screen. With a second screen, the **presenter view** opens on it:
+the current slide (transitions included), what the next key press will show,
+the speaker notes written in Impress, the elapsed time and the clock.
+
+Options: `--screen N` (audience, see `--list-screens`), `--presenter-screen N`,
+`--presenter on|off|auto` (`on` with a single screen opens it in a window, to
+rehearse), `--windowed`, `--start N` (slide number), `--software` (no OpenGL).
 
 | Action | Keys / mouse |
 |---|---|
@@ -48,7 +52,9 @@ the laptop screen. Options:
 | first / last slide | Home / End |
 | black / white screen | B or `.` / W or `,` (same key to come back) |
 | fullscreen on/off | F or F11 |
-| move to the next screen | S |
+| move to the next screen (swap with the presenter view) | S |
+| reset the presenter timer | R |
+| notes text size | + / − |
 | quit | Esc or Q |
 
 Going back replays transitions in reverse. During a transition, a key in the

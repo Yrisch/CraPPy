@@ -111,7 +111,7 @@ def deck(tmp_path):
     dot = clear.copy()
     dot[10:20, 10:20] = (255, 255, 255, 255)
     slides = [
-        {"number": 1, "name": "one", "hidden": False, "notes": "", "background": bg,
+        {"number": 1, "name": "one", "hidden": False, "notes": "Say hello\nthen the dot", "background": bg,
          "steps": [{"overlay": save("o1.png", clear), "effect": {"kind": "cut", "duration": 0}},
                    {"overlay": save("o2.png", dot), "effect": {"kind": "cut", "duration": 0}}],
          "transition": {"kind": "cut"}},
@@ -186,3 +186,54 @@ def test_default_screen_prefers_an_external_output():
     assert default_screen([laptop, projector], laptop) is projector
     assert default_screen([desk, laptop, projector], desk) is projector
     assert default_screen([FakeScreen("A"), FakeScreen("B")], None).name() == "A"
+
+
+# --- presenter view ---------------------------------------------------------------
+
+
+def presenter_image(c, size=(1200, 675)) -> np.ndarray:
+    from crappy.player.presenter import paint_presenter
+    out = QImage(*size, QImage.Format.Format_RGB32)
+    p = QPainter(out)
+    paint_presenter(p, QRectF(0, 0, *size), c)
+    p.end()
+    return to_array(out)
+
+
+def test_presenter_view(app, deck):
+    from crappy.player.presenter import describe, format_elapsed
+    clock = Clock()
+    c = Controller(deck, clock=clock)
+    img = presenter_image(c)
+    bg = np.array([0x1b, 0x1b, 0x1b])
+    # current slide (black background, no dot yet) on the left, under the top bar
+    assert img[200, 100].max() == 0
+    # next = click 2 of the same slide: the white dot shows in the "next" preview,
+    # the preview is in the right column, 16:9, under the "NEXT" label
+    right = img[:, 800:]
+    assert (right == 255).all(axis=-1).any()
+    # notes are written (light text on the dark background, bottom right)
+    h, w = img.shape[:2]
+    notes = img[int(0.52 * h):int(0.66 * h), int(0.62 * w):int(0.98 * w)]
+    assert (np.abs(notes.astype(int) - bg).sum(-1) > 200).sum() > 50
+
+    c.key(Qt.Key.Key_Space)                                # click: now "next" is slide 2 (white)
+    img = presenter_image(c)
+    assert (img[150:300, 820:1150] > 250).all()
+    c.key(Qt.Key.Key_Right)
+    clock.t = 5.0                                          # fade done: end of talk
+    assert c.timeline.forward_from(c.timeline.scene(clock.t).pos) is None
+    img = presenter_image(c)
+    assert img[150:300, 820:1150].mean() < 30               # "end" on black
+
+    c.key(Qt.Key.Key_B)                                    # blackout is shown, not hidden
+    blank = presenter_image(c)
+    assert not (blank == img).all()
+
+    assert format_elapsed(65) == "01:05" and format_elapsed(3725) == "1:02:05"
+    assert describe(deck.slides[1].transition) == "fade 1.0 s"
+    clock.t = 30.0
+    c.key(Qt.Key.Key_R)
+    assert c.elapsed() == 0
+    c.key(Qt.Key.Key_Plus)
+    assert c.notes_scale > 1

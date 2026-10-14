@@ -99,6 +99,10 @@ class Timeline:
                 out += [Pos(s, k) for k in range(self.deck.slides[s].n_steps)]
         return out
 
+    def forward_from(self, pos: Pos) -> tuple[Pos, Effect] | None:
+        """Where the next key press goes from `pos`, and how."""
+        return self._forward_from(pos)
+
     def moves(self) -> list[tuple[Pos, Pos, Effect, int]]:
         """The animations the next key presses would start: (a, b, effect, direction)."""
         out = []

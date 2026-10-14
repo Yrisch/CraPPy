@@ -6,7 +6,8 @@ Keys
   1 2 ... Enter    go to slide number
   Home / End       first / last slide
   B or .  black screen        W or ,  white screen     (again to come back)
-  F / F11 fullscreen on/off   S  move to the next screen    Esc / Q  quit
+  F / F11 fullscreen on/off   S  move to the next screen (swap with the presenter view)
+  R  reset the presenter timer   + / -  notes text size     Esc / Q  quit
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from __future__ import annotations
 import time
 
 from PySide6.QtCore import QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QGuiApplication, QKeyEvent, QMouseEvent, QPainter, QScreen, QWheelEvent
+from PySide6.QtGui import QColor, QFont, QKeyEvent, QMouseEvent, QPainter, QScreen, QWheelEvent
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import QWidget
 
@@ -49,7 +50,7 @@ def fit(width: float, height: float, outer: QRectF) -> QRectF:
 
 
 class Controller:
-    """Everything but the widget itself, so the GL and raster views share it."""
+    """Everything but the widgets: the audience view and the presenter view share it."""
 
     def __init__(self, deck: Deck, start: Pos | None = None, clock=time.monotonic):
         self.deck = deck
@@ -62,11 +63,20 @@ class Controller:
         self.clip_frames_late = 0           # shown while the exact frame was not decoded yet
         self.blank: QColor | None = None
         self.typed = ""                  # slide number being typed
-        self.request_update = lambda: None
+        self.started = clock()           # presenter timer
+        self.notes_scale = 1.0
+        self.views: list = []
         self.request_quit = lambda: None
         self.toggle_fullscreen = lambda: None
         self.next_screen = lambda: None
         self._preload()
+
+    def request_update(self) -> None:
+        for view in self.views:
+            view.update()
+
+    def elapsed(self) -> float:
+        return self.clock() - self.started
 
     def _preload(self) -> None:
         """Keep ready what the screen shows now and what the next key presses may show."""
@@ -151,6 +161,12 @@ class Controller:
             self.toggle_fullscreen()
         elif key == K.Key_S:
             self.next_screen()
+        elif key == K.Key_R:
+            self.started = now
+        elif key in (K.Key_Plus, K.Key_Equal):
+            self.notes_scale = min(3.0, self.notes_scale * 1.15)
+        elif key == K.Key_Minus:
+            self.notes_scale = max(0.4, self.notes_scale / 1.15)
         elif key in NEXT_KEYS or key in ENTER_KEYS:
             self.next()
         elif key in PREV_KEYS:
@@ -222,22 +238,22 @@ class Controller:
 
 
 class _ViewMixin:
-    """Input plumbing shared by the GL and raster widgets."""
+    """Input plumbing shared by the audience and presenter widgets."""
 
     controller: Controller
 
-    def _setup(self, controller: Controller) -> None:
+    def _setup(self, controller: Controller, title: str, hide_cursor: bool = True) -> None:
         self.controller = controller
-        controller.request_update = self.update
-        controller.request_quit = self.window().close
-        controller.toggle_fullscreen = self._toggle_fullscreen
-        controller.next_screen = self._next_screen
+        controller.views.append(self)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
-        self.setWindowTitle(f"CraPPy — {controller.deck.root.name}")
+        self.setWindowTitle(title)
+        self._screen = None
+        self._hide_cursor = hide_cursor
         self._cursor_timer = QTimer(self, singleShot=True, interval=CURSOR_HIDE_MS)
-        self._cursor_timer.timeout.connect(lambda: self.setCursor(Qt.CursorShape.BlankCursor))
-        self._cursor_timer.start()
+        if hide_cursor:
+            self._cursor_timer.timeout.connect(lambda: self.setCursor(Qt.CursorShape.BlankCursor))
+            self._cursor_timer.start()
 
     def present(self, screen: QScreen, fullscreen: bool = True) -> None:
         """Show on `screen`.
@@ -256,22 +272,24 @@ class _ViewMixin:
             self.resize(1280, 720)
             self.show()
 
-    def _toggle_fullscreen(self) -> None:
+    def move_to(self, screen: QScreen) -> None:
+        # a mapped Wayland surface stays where the compositor put it: unmap it,
+        # so that showing it again sends a new request naming the target output
+        fullscreen = self.isFullScreen()
+        self.hide()
+        self.present(screen, fullscreen)
+
+    @property
+    def target_screen(self) -> QScreen | None:
+        return self._screen
+
+    def toggle_fullscreen(self) -> None:
         if self.isFullScreen():
             self.showNormal()
         else:
-            self.windowHandle().setScreen(self._screen)
+            if self._screen is not None:
+                self.windowHandle().setScreen(self._screen)
             self.showFullScreen()
-
-    def _next_screen(self) -> None:
-        screens = QGuiApplication.screens()
-        current = screens.index(self._screen) if self._screen in screens else 0
-        target = screens[(current + 1) % len(screens)]
-        fullscreen = self.isFullScreen()
-        # a mapped Wayland surface stays where the compositor put it: unmap it,
-        # so that showing it again sends a new request naming the target output
-        self.hide()
-        self.present(target, fullscreen)
 
     def _frame(self, painter: QPainter) -> None:
         if self.controller.paint(painter, QRectF(self.rect())):
@@ -289,7 +307,8 @@ class _ViewMixin:
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         self.unsetCursor()
-        self._cursor_timer.start()
+        if self._hide_cursor:
+            self._cursor_timer.start()
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         dy = event.angleDelta().y()
@@ -299,14 +318,16 @@ class _ViewMixin:
             self.controller.prev()
 
     def closeEvent(self, event) -> None:
-        self.controller.close()
+        if self in self.controller.views:
+            self.controller.views.remove(self)
+        self.controller.request_quit()          # closing either window ends the show
         super().closeEvent(event)
 
 
 class GLView(_ViewMixin, QOpenGLWidget):
     def __init__(self, controller: Controller):
         super().__init__()
-        self._setup(controller)
+        self._setup(controller, f"CraPPy — {controller.deck.root.name}")
 
     def paintGL(self) -> None:
         painter = QPainter(self)
@@ -320,7 +341,7 @@ class RasterView(_ViewMixin, QWidget):
     def __init__(self, controller: Controller):
         super().__init__()
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)
-        self._setup(controller)
+        self._setup(controller, f"CraPPy — {controller.deck.root.name}")
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)

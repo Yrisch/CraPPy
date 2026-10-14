@@ -74,7 +74,8 @@ def cmd_play(args) -> int:
         manifest = talk / "manifest.json"
     else:
         manifest = talk
-    return run(manifest, args.screen, args.windowed, args.start, args.software)
+    return run(manifest, args.screen, args.windowed, args.start, args.software,
+               args.presenter, args.presenter_screen)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -105,6 +106,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("-w", "--windowed", action="store_true", help="in a window instead of fullscreen")
     p.add_argument("--start", type=int, help="start at this slide number")
     p.add_argument("--software", action="store_true", help="draw without OpenGL")
+    p.add_argument("--presenter", choices=("auto", "on", "off"), default="auto",
+                   help="presenter view (notes, next slide, timer): auto = when there is a second screen; "
+                        "'on' with a single screen opens it in a window (rehearsal)")
+    p.add_argument("--presenter-screen", type=int, help="screen of the presenter view (see --list-screens)")
     p.add_argument("-o", "--output", type=Path, help="build folder (default: <talk>.crappy next to the .odp)")
     p.add_argument("--size", type=_size, default=(1920, 1080), help="build size WIDTHxHEIGHT (default 1920x1080)")
     p.add_argument("-j", "--jobs", type=int, help="parallel LibreOffice instances for the build")
