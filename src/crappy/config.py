@@ -19,6 +19,11 @@
     fps = 30
     overlay_in = 1.0                       # per-transition override
 
+    # only the content fades of the clip deduced from the movie
+    [transition.page3]
+    overlay_out = 0.8
+    overlay_in = 1.2
+
     # override a transition (also one deduced from a movie)
     [transition."Conclusion and Perspectives"]
     kind = "fade_color"
@@ -71,6 +76,12 @@ class TransitionOverride:
     duration: float | None = None
     side: str | None = None
     color: str | None = None
+    overlay_in: float | None = None      # only fade times: tunes the clip deduced from the movie
+    overlay_out: float | None = None
+
+    @property
+    def replaces_transition(self) -> bool:
+        return any(v is not None for v in (self.kind, self.duration, self.side, self.color))
 
 
 @dataclass
@@ -152,8 +163,13 @@ def load_config(path: Path | None) -> Config:
                     raise ConfigError(f"{where}: {spec['clip']!r} does not exist")
             cfg.clips[slide] = clip
         else:
+            if keys & {"fps"}:
+                raise ConfigError(f"{where}: 'fps' needs 'frames' or 'clip'")
             o = TransitionOverride(kind=spec.get("kind"), duration=spec.get("duration"),
-                                   side=spec.get("side"), color=spec.get("color"))
+                                   side=spec.get("side"), color=spec.get("color"),
+                                   overlay_in=spec.get("overlay_in"), overlay_out=spec.get("overlay_out"))
+            if o.replaces_transition and (o.overlay_in is not None or o.overlay_out is not None):
+                raise ConfigError(f"{where}: overlay_in/overlay_out only apply to clips, not to kind = ...")
             if o.kind is not None and o.kind not in _KINDS:
                 raise ConfigError(f"{where}: kind must be one of {sorted(_KINDS)}")
             if o.side is not None and o.side not in _SIDES:

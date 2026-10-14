@@ -89,6 +89,17 @@ transition plays the movie from one frame to the other (backwards if needed):
 content fades out at the start, the incoming one fades in at the end. Going back
 plays the clip in reverse; keys skip or turn it around like any transition.
 
+Content fades during a clip: `overlay_out` is how long the outgoing slide's
+content takes to fade out, starting with the clip; `overlay_in` how long the
+incoming content takes to fade in, ending with the clip. Set them in
+`[defaults]`, in `[movie]`, or for one transition, which keeps the clip:
+
+```toml
+[transition.page3]      # the clip into slide "page3" (or "3")
+overlay_out = 0.8
+overlay_in = 1.2
+```
+
 `crappy info talk.odp` shows which transitions became clips. The build encodes
 only the frames that are used (H.264, every frame a keyframe, full colour
 resolution: visually lossless, and any frame decodes in a few ms), once: the

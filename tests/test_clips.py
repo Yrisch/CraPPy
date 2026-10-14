@@ -49,6 +49,12 @@ def test_clips_deduced_from_background_names(tmp_path):
     # an explicit transition in the side file wins over the movie
     cfg.overrides["s3"] = TransitionOverride(kind="fade")
     assert analyse(make_movie_package(frames), cfg).slides[2].clip is None
+    # fade times alone tune the deduced clip instead of replacing it
+    cfg.overrides["s3"] = TransitionOverride(overlay_out=0.8, overlay_in=0.1)
+    clip = analyse(make_movie_package(frames), cfg).slides[2].clip
+    assert (clip.start, clip.end, clip.overlay_out, clip.overlay_in) == (4, 1, 0.8, 0.1)
+    analysis = analyse(make_movie_package(frames), Config(overrides={"s1": TransitionOverride(overlay_in=1)}))
+    assert "not entered through a clip" in analysis.warnings[0]
     # no [movie] section: plain slides
     assert all(s.clip is None for s in analyse(make_movie_package(frames), Config()).slides)
 

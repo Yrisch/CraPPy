@@ -28,7 +28,8 @@ def cmd_info(args) -> int:
     for s in slides:
         if s.clip:
             c = s.clip
-            t = f"clip {c.movie} frames {c.start}->{c.end} ({c.duration:g}s)" if c.end >= 0 else f"clip {c.movie}"
+            t = (f"clip {c.movie} frames {c.start}->{c.end} ({c.duration:g}s)" if c.end >= 0 else f"clip {c.movie}") \
+                + f" fade out {c.overlay_out:g}s / in {c.overlay_in:g}s"
         else:
             t = s.transition.kind + (f" {s.transition.duration:g}s" if s.transition.kind != "cut" else "")
         bg = f"  bg={s.background_image.name}" if s.background_image else ""

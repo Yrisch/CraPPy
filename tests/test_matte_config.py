@@ -77,6 +77,8 @@ def test_movie_sections(tmp_path):
 
 @pytest.mark.parametrize("body, message", [
     ('[movie]\nfps = 30', "'frames' is required"),
+    ('[transition.a]\nkind = "fade"\noverlay_in = 1', "only apply to clips"),
+    ('[transition.a]\nfps = 25', "needs 'frames'"),
     ('[movie]\nframes = "nothing*.png"', "no file matches"),
     ('[transition.a]\nframes = "none/*.png"', "no file matches"),
     ('[transition.a]\nkind = "spin"', "kind must be"),

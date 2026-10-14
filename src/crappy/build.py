@@ -142,7 +142,7 @@ def analyse(pkg: OdfPackage, cfg: Config) -> Analysis:
             end = len(clip.frames) - 1 if clip.frames else -1
             s.clip = ClipPlan(mid, 0, end, clip.fps, clip.overlay_in, clip.overlay_out, "config")
     for key, o in cfg.overrides.items():
-        if key in by_key:
+        if key in by_key and o.replaces_transition:
             s = by_key[key]
             t = s.transition
             t.kind = o.kind or t.kind
@@ -163,6 +163,19 @@ def analyse(pkg: OdfPackage, cfg: Config) -> Analysis:
             s.clip = ClipPlan(s.movie_frame[0], previous.movie_frame[1], s.movie_frame[1],
                               m.fps, m.overlay_in, m.overlay_out, "movie")
         previous = s
+
+    # fade times given for a single transition
+    for key, o in cfg.overrides.items():
+        if key in by_key and not o.replaces_transition:
+            s = by_key[key]
+            if s.clip is None:
+                warnings.append(f"config: [transition.{key!r}] sets fade times but slide {s.number} "
+                                "is not entered through a clip")
+                continue
+            if o.overlay_in is not None:
+                s.clip.overlay_in = float(o.overlay_in)
+            if o.overlay_out is not None:
+                s.clip.overlay_out = float(o.overlay_out)
     return Analysis(slides, movies, warnings)
 
 
