@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "crappy"
+version = "0.1.0"
+description = "LibreOffice slides composited over astrophysical simulation snapshots, with movie transitions"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Yann Bernard", email = "yannbernard13@gmail.com" }]
+dependencies = [
+    "lxml>=5",
+    "numpy>=1.26",
+    "pillow>=10",
+    "pypdfium2>=4.30",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+crappy = "crappy.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/crappy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["soffice: needs a LibreOffice installation (slow)"]
