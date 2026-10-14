@@ -19,10 +19,11 @@
     fps = 30
     overlay_in = 1.0                       # per-transition override
 
-    # only the content fades of the clip deduced from the movie
+    # only the content fades of the clip deduced from the movie; a negative
+    # value fades outside the movie (-0.5: fade in during 0.5 s once it ended)
     [transition.page3]
     overlay_out = 0.8
-    overlay_in = 1.2
+    overlay_in = -0.5
 
     # override a transition (also one deduced from a movie)
     [transition."Conclusion and Perspectives"]

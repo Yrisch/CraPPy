@@ -29,7 +29,8 @@ def cmd_info(args) -> int:
         if s.clip:
             c = s.clip
             t = (f"clip {c.movie} frames {c.start}->{c.end} ({c.duration:g}s)" if c.end >= 0 else f"clip {c.movie}") \
-                + f" fade out {c.overlay_out:g}s / in {c.overlay_in:g}s"
+                + " fade out " + (f"{c.overlay_out:g}s" if c.overlay_out >= 0 else f"{-c.overlay_out:g}s before") \
+                + " / in " + (f"{c.overlay_in:g}s" if c.overlay_in >= 0 else f"{-c.overlay_in:g}s after")
         else:
             t = s.transition.kind + (f" {s.transition.duration:g}s" if s.transition.kind != "cut" else "")
         bg = f"  bg={s.background_image.name}" if s.background_image else ""

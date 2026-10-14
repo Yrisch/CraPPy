@@ -92,7 +92,11 @@ plays the clip in reverse; keys skip or turn it around like any transition.
 Content fades during a clip: `overlay_out` is how long the outgoing slide's
 content takes to fade out, starting with the clip; `overlay_in` how long the
 incoming content takes to fade in, ending with the clip. Set them in
-`[defaults]`, in `[movie]`, or for one transition, which keeps the clip:
+`[defaults]`, in `[movie]`, or for one transition, which keeps the clip.
+A negative value moves a fade outside the movie: `overlay_in = -0.5` lets the
+movie reach the next slide's background, then fades its content in over 0.5 s;
+`overlay_out = -0.5` fades the old content out before the movie starts. The
+transition gets longer by these times.
 
 ```toml
 [transition.page3]      # the clip into slide "page3" (or "3")

@@ -28,6 +28,22 @@ def test_clip_frames_and_overlay_fades():
     assert back.overlay_alphas(1) == (0.0, 1.0)
 
 
+def test_fades_outside_the_movie():
+    # text fades out 0.5 s before a 1 s movie, new text fades in 0.5 s after it
+    clip = ClipRef("m", 0, 30, fps=30, overlay_in=-0.5, overlay_out=-0.5)
+    assert clip.duration == pytest.approx(2.0)
+    at = lambda seconds: seconds / clip.duration                          # noqa: E731
+    assert clip.index(at(0.25)) == 0 and clip.overlay_alphas(at(0.25)) == pytest.approx((0.5, 0.0))
+    assert clip.index(at(1.0)) == 15 and clip.overlay_alphas(at(1.0)) == (0.0, 0.0)
+    assert clip.index(at(1.5)) == 30 and clip.overlay_alphas(at(1.5)) == (0.0, 0.0)
+    assert clip.index(at(1.75)) == 30 and clip.overlay_alphas(at(1.75)) == pytest.approx((0.0, 0.5))
+    # mixed: usual fade-out during the movie, fade-in after it
+    clip = ClipRef("m", 0, 30, fps=30, overlay_in=-0.4, overlay_out=0.3)
+    assert clip.duration == pytest.approx(1.4)
+    assert clip.overlay_alphas(0.3 / 1.4)[0] == pytest.approx(0.0)
+    assert clip.overlay_alphas(1.2 / 1.4) == pytest.approx((0.0, 0.5))
+
+
 def test_upcoming_frames_skip_the_slides_own_backgrounds():
     clip = ClipRef("m", 10, 20, 30, 0.5, 0.3)
     assert upcoming_frames(clip, 0.0, +1, 4) == [11, 12, 13]           # frame 10 is slide A's background

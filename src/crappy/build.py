@@ -58,7 +58,8 @@ class ClipPlan:
 
     @property
     def duration(self) -> float:
-        return abs(self.end - self.start) / self.fps
+        """Whole transition: the movie, plus fades placed before/after it (negative values)."""
+        return abs(self.end - self.start) / self.fps + max(0.0, -self.overlay_out) + max(0.0, -self.overlay_in)
 
 
 @dataclass
@@ -412,7 +413,8 @@ def build(odp: Path, out_dir: Path | None = None, size: tuple[int, int] = (1920,
                 c = s.clip
                 end = c.end if c.end >= 0 else movies[c.movie]["count"] - 1
                 transition = {"kind": "clip", "movie": c.movie, "start": c.start, "end": end, "fps": c.fps,
-                              "duration": abs(end - c.start) / c.fps, "overlay_in": c.overlay_in,
+                              "duration": abs(end - c.start) / c.fps + max(0.0, -c.overlay_out)
+                              + max(0.0, -c.overlay_in), "overlay_in": c.overlay_in,
                               "overlay_out": c.overlay_out, "source": c.source}
             slide_entries.append({
                 "number": s.number, "name": s.name, "hidden": s.hidden, "notes": s.notes,
