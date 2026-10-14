@@ -161,3 +161,21 @@ def test_clip_transitions_fall_back_to_fade(tmp_path, deck):
     data["slides"][1]["transition"] = {"kind": "clip", "frames": ["f"] * 90, "fps": 30}
     (deck.root / "manifest.json").write_text(json.dumps(data))
     assert Deck.load(deck.root / "manifest.json").slides[1].transition == Effect("fade", 1.0)
+
+
+class FakeScreen:
+    def __init__(self, name):
+        self._name = name
+
+    def name(self):
+        return self._name
+
+
+def test_default_screen_prefers_an_external_output():
+    from crappy.player.app import default_screen
+    laptop, desk, projector = FakeScreen("eDP-1"), FakeScreen("HDMI-1"), FakeScreen("DP-2")
+    assert default_screen([laptop], laptop) is laptop
+    assert default_screen([desk, laptop], desk) is desk              # external, even if primary
+    assert default_screen([laptop, projector], laptop) is projector
+    assert default_screen([desk, laptop, projector], desk) is projector
+    assert default_screen([FakeScreen("A"), FakeScreen("B")], None).name() == "A"

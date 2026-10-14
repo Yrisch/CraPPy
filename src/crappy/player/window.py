@@ -6,7 +6,7 @@ Keys
   1 2 ... Enter    go to slide number
   Home / End       first / last slide
   B or .  black screen        W or ,  white screen     (again to come back)
-  F / F11 fullscreen on/off   Esc / Q  quit
+  F / F11 fullscreen on/off   S  move to the next screen    Esc / Q  quit
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from __future__ import annotations
 import time
 
 from PySide6.QtCore import QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QKeyEvent, QMouseEvent, QPainter, QWheelEvent
+from PySide6.QtGui import QColor, QFont, QGuiApplication, QKeyEvent, QMouseEvent, QPainter, QScreen, QWheelEvent
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import QWidget
 
@@ -50,6 +50,7 @@ class Controller:
         self.request_update = lambda: None
         self.request_quit = lambda: None
         self.toggle_fullscreen = lambda: None
+        self.next_screen = lambda: None
         self._preload()
 
     def _preload(self) -> None:
@@ -80,6 +81,8 @@ class Controller:
             self._toggle_blank(QColor("white"))
         elif key in (K.Key_F, K.Key_F11):
             self.toggle_fullscreen()
+        elif key == K.Key_S:
+            self.next_screen()
         elif key in NEXT_KEYS or key in ENTER_KEYS:
             self.next()
         elif key in PREV_KEYS:
@@ -159,6 +162,7 @@ class _ViewMixin:
         controller.request_update = self.update
         controller.request_quit = self.window().close
         controller.toggle_fullscreen = self._toggle_fullscreen
+        controller.next_screen = self._next_screen
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
         self.setWindowTitle(f"CraPPy — {controller.deck.root.name}")
@@ -166,11 +170,39 @@ class _ViewMixin:
         self._cursor_timer.timeout.connect(lambda: self.setCursor(Qt.CursorShape.BlankCursor))
         self._cursor_timer.start()
 
+    def present(self, screen: QScreen, fullscreen: bool = True) -> None:
+        """Show on `screen`.
+
+        On Wayland a client cannot position its windows: the screen only counts
+        when it is set on the native window (QWindow) before the fullscreen
+        request, which then names that output. QWidget.setScreen() before the
+        native window exists is ignored, hence create() first.
+        """
+        self._screen = screen
+        self.create()
+        self.windowHandle().setScreen(screen)
+        if fullscreen:
+            self.showFullScreen()
+        else:
+            self.resize(1280, 720)
+            self.show()
+
     def _toggle_fullscreen(self) -> None:
         if self.isFullScreen():
             self.showNormal()
         else:
+            self.windowHandle().setScreen(self._screen)
             self.showFullScreen()
+
+    def _next_screen(self) -> None:
+        screens = QGuiApplication.screens()
+        current = screens.index(self._screen) if self._screen in screens else 0
+        target = screens[(current + 1) % len(screens)]
+        fullscreen = self.isFullScreen()
+        # a mapped Wayland surface stays where the compositor put it: unmap it,
+        # so that showing it again sends a new request naming the target output
+        self.hide()
+        self.present(target, fullscreen)
 
     def _frame(self, painter: QPainter) -> None:
         if self.controller.paint(painter, QRectF(self.rect())):

@@ -26,9 +26,21 @@ def _pick_screen(app: QGuiApplication, index: int | None):
         if not 0 <= index < len(screens):
             raise SystemExit(f"error: no screen {index}; screens: {screens_summary()}")
         return screens[index]
-    # a projector is usually the screen that is not the primary one
-    others = [s for s in screens if s != app.primaryScreen()]
-    return others[0] if others else app.primaryScreen()
+    return default_screen(screens, app.primaryScreen())
+
+
+# connector names of built-in laptop panels
+_INTERNAL = ("eDP", "LVDS", "DSI")
+
+
+def default_screen(screens, primary):
+    """A projector is an external output: prefer external screens, and among
+    several, one that is not the primary (the desk monitor)."""
+    if len(screens) == 1:
+        return screens[0]
+    external = [s for s in screens if not s.name().startswith(_INTERNAL)]
+    candidates = [s for s in external if s != primary] or external or [s for s in screens if s != primary]
+    return candidates[0]
 
 
 def run(manifest: Path, screen: int | None = None, windowed: bool = False, start: int | None = None,
@@ -49,10 +61,5 @@ def run(manifest: Path, screen: int | None = None, windowed: bool = False, start
     controller = Controller(deck, start_pos)
     view = (RasterView if software else GLView)(controller)
 
-    view.setScreen(_pick_screen(app, screen))
-    if windowed:
-        view.resize(1280, 720)
-        view.show()
-    else:
-        view.showFullScreen()
+    view.present(_pick_screen(app, screen), fullscreen=not windowed)
     return app.exec()

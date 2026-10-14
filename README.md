@@ -33,8 +33,9 @@ The build is cached: it only re-renders when the `.odp` or its side file changes
 
 ## Showing a talk
 
-`crappy play talk.odp` opens fullscreen on a non-primary screen when there is
-one (usually the projector), otherwise on the main screen. Options:
+`crappy play talk.odp` opens fullscreen on an external screen when there is
+one (the projector; with several, one that is not the primary), otherwise on
+the laptop screen. Options:
 `--screen N` (see `--list-screens`), `--windowed`, `--start N` (slide number),
 `--software` (no OpenGL).
 
@@ -46,6 +47,7 @@ one (usually the projector), otherwise on the main screen. Options:
 | first / last slide | Home / End |
 | black / white screen | B or `.` / W or `,` (same key to come back) |
 | fullscreen on/off | F or F11 |
+| move to the next screen | S |
 | quit | Esc or Q |
 
 Going back replays transitions in reverse. During a transition, a key in the
