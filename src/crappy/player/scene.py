@@ -7,6 +7,11 @@ Transitions work on whole composited slides A and B:
   cover       B slides in from `side` over a still A
   uncover     A slides out towards `side`, revealing a still B
   wipe        B is revealed by an edge moving away from `side`
+  clip        the movie plays as background; A's content fades out at the start,
+              B's content fades in at the end
+
+`images` provides: composite(pos) (background + overlay), overlay(pos), and
+clip_background(blend) (the movie frame to show, never blocking).
 """
 
 from __future__ import annotations
@@ -25,16 +30,27 @@ def _smooth(p: float) -> float:
     return p * p * (3 - 2 * p)
 
 
-def draw(painter: QPainter, target: QRectF, scene: Still | Blend, image_for) -> None:
-    """image_for(pos) -> QImage of that position, already composited."""
+def draw(painter: QPainter, target: QRectF, scene: Still | Blend, images) -> None:
     painter.save()
     painter.setClipRect(target)
     painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
     if isinstance(scene, Still):
-        painter.drawImage(target, image_for(scene.pos))
+        painter.drawImage(target, images.composite(scene.pos))
+    elif scene.effect.kind == "clip" and scene.effect.clip is not None:
+        _draw_clip(painter, target, scene, images)
     else:
-        _draw_blend(painter, target, scene, image_for(scene.a), image_for(scene.b))
+        _draw_blend(painter, target, scene, images.composite(scene.a), images.composite(scene.b))
     painter.restore()
+
+
+def _draw_clip(painter: QPainter, r: QRectF, s: Blend, images) -> None:
+    painter.drawImage(r, images.clip_background(s))
+    alpha_a, alpha_b = s.effect.clip.overlay_alphas(s.progress)
+    for pos, alpha in ((s.a, alpha_a), (s.b, alpha_b)):
+        if alpha > 0:
+            painter.setOpacity(alpha)
+            painter.drawImage(r, images.overlay(pos))
+    painter.setOpacity(1.0)
 
 
 def _draw_blend(painter: QPainter, r: QRectF, s: Blend, a: QImage, b: QImage) -> None:

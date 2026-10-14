@@ -1,13 +1,13 @@
 from fixtures import make_package
 
-from crappy.background import BACKDROPS, DARK_LUMINANCE, background_class, hex_to_rgb, luminance
+from crappy.background import BACKDROPS, DARK_BRIGHTNESS, background_class, brightness, hex_to_rgb
 from crappy.odf import NS, q
 
 
 def test_backdrop_pairs_stay_on_their_side():
     for cls, pair in BACKDROPS.items():
         for color in pair:
-            dark = luminance(hex_to_rgb(color)) <= DARK_LUMINANCE
+            dark = brightness(hex_to_rgb(color)) <= DARK_BRIGHTNESS
             assert dark == (cls == "dark"), color
 
 
@@ -32,3 +32,12 @@ def test_gradient_and_master_fill():
     master.set(q("draw:fill"), "solid")
     master.set(q("draw:fill-color"), "#101010")
     assert background_class(pkg, pkg.pages()[1]) == "dark"
+
+
+def test_threshold_measured_on_libreoffice():
+    # (colour, text LibreOffice 26.8 draws on it in Automatic colour)
+    measured = [("#9e9e9e", "white"), ("#9f9f9f", "black"), ("#ff0000", "white"), ("#00ff00", "black"),
+                ("#0000ff", "white"), ("#ff8000", "black"), ("#808000", "white"), ("#00a800", "white")]
+    for color, text in measured:
+        dark = brightness(hex_to_rgb(color)) <= DARK_BRIGHTNESS
+        assert dark == (text == "white"), color

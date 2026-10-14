@@ -150,3 +150,57 @@ def make_package() -> OdfPackage:
         "META-INF/manifest.xml": MANIFEST.encode(),
     }
     return OdfPackage(files, etree.fromstring(files["content.xml"]), etree.fromstring(files["styles.xml"]))
+
+
+# --- a talk on a movie ----------------------------------------------------------
+
+MOVIE_SIZE = (640, 360)
+
+
+def make_frames(folder, n: int = 5):
+    """Synthetic rendered frames frame_00000.png ... : distinct colours + a gradient."""
+    import numpy as np
+    from PIL import Image
+    folder.mkdir(parents=True, exist_ok=True)
+    w, h = MOVIE_SIZE
+    ramp = np.linspace(0, 60, w)[None, :, None]
+    paths = []
+    for k in range(n):
+        rgb = np.broadcast_to(np.array([30 + 40 * k, 60, 200 - 35 * k], float), (h, w, 3)) + ramp
+        path = folder / f"frame_{k:05d}.png"
+        Image.fromarray(np.clip(rgb, 0, 255).astype(np.uint8)).save(path)
+        paths.append(path)
+    return paths
+
+
+def make_movie_package(frames, backgrounds=(0, 4, 1)) -> OdfPackage:
+    """One slide per entry of `backgrounds`: a stretched picture background that is
+    that frame (inserted from its file, so named after it) and a line of text."""
+    fill_images, page_styles, pages, files = [], [], [], {}
+    for i, k in enumerate(backgrounds):
+        stem = frames[k].stem
+        member = f"Pictures/{stem}.png"
+        files[member] = frames[k].read_bytes()
+        fill_images.append(f'<draw:fill-image draw:name="{stem.replace("_", "_5f_")}" draw:display-name="{stem}" '
+                           f'xlink:href="{member}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad"/>')
+        page_styles.append(f'<style:style style:name="dp{i}" style:family="drawing-page"><style:drawing-page-properties '
+                           f'presentation:background-visible="true" presentation:background-objects-visible="true" '
+                           f'draw:fill="bitmap" draw:fill-image-name="{stem.replace("_", "_5f_")}" style:repeat="stretch"/>'
+                           f'</style:style>')
+        pages.append(f'<draw:page draw:name="s{i + 1}" draw:style-name="dp{i}" draw:master-page-name="Default">'
+                     f'<draw:frame draw:style-name="gr_text" svg:x="2cm" svg:y="2cm" svg:width="20cm" svg:height="3cm">'
+                     f'<draw:text-box><text:p text:style-name="P1">Slide {i + 1}</text:p></draw:text-box></draw:frame>'
+                     f'</draw:page>')
+    styles = STYLES.replace("<office:styles>", "<office:styles>" + "".join(fill_images))
+    content = CONTENT[:CONTENT.index("<office:body>")].replace(
+        "<office:automatic-styles>", "<office:automatic-styles>" + "".join(page_styles))
+    content += "<office:body><office:presentation>" + "".join(pages) + \
+        "</office:presentation></office:body></office:document-content>"
+    # LibreOffice treats an undeclared member as a damaged package
+    entries = "".join(f'<manifest:file-entry manifest:full-path="{m}" manifest:media-type="image/png"/>' for m in files)
+    files |= {
+        "mimetype": b"application/vnd.oasis.opendocument.presentation",
+        "content.xml": content.encode(), "styles.xml": styles.encode(),
+        "META-INF/manifest.xml": MANIFEST.replace("</manifest:manifest>", entries + "</manifest:manifest>").encode(),
+    }
+    return OdfPackage(files, etree.fromstring(files["content.xml"]), etree.fromstring(files["styles.xml"]))

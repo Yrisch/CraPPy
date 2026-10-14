@@ -91,12 +91,13 @@ def test_analyse_applies_config():
     cfg = Config(clips={"steps": ClipSpec(fps=24)},
                  overrides={"1": TransitionOverride(kind="push", side="left", duration=0.8)},
                  )
-    slides, warnings = analyse(make_package(), cfg)
+    analysis = analyse(make_package(), cfg)
+    slides, warnings = analysis.slides, analysis.warnings
     assert [s.name for s in slides] == ["dark", "steps"]
-    assert slides[1].clip is not None and slides[1].clip.fps == 24
+    assert slides[1].clip is not None and slides[1].clip.fps == 24 and slides[1].clip.source == "config"
     t = slides[0].transition
     assert (t.kind, t.side, t.duration, t.source) == ("push", "left", 0.8, "config")
     assert not warnings
 
-    _, warnings = analyse(make_package(), Config(overrides={"nope": TransitionOverride(kind="fade")}))
+    warnings = analyse(make_package(), Config(overrides={"nope": TransitionOverride(kind="fade")})).warnings
     assert "nope" in warnings[0]

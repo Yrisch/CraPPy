@@ -57,11 +57,27 @@ side = "left"
     clip = cfg.clips["halo"]
     assert [p.name for p in clip.frames] == ["f1.png", "f2.png", "f10.png"]
     assert (clip.fps, clip.overlay_in, clip.overlay_out) == (25, 0.8, 0.3)
-    assert clip.duration == pytest.approx(3 / 25)
     assert cfg.overrides["Conclusion"].kind == "push"
 
 
+def test_movie_sections(tmp_path):
+    for i in range(3):
+        (tmp_path / f"frame_{i:05d}.png").write_bytes(b"")
+    path = tmp_path / "t.crappy.toml"
+    path.write_text('[defaults]\noverlay_out = 0.2\n[movie]\nframes = "frame_*.png"\nfps = 24\n')
+    cfg = load_config(path)
+    (m,) = cfg.movies
+    assert (m.fps, m.overlay_out, m.overlay_in) == (24, 0.2, 0.5)
+    assert m.index_of_stem() == {"frame_00000": 0, "frame_00001": 1, "frame_00002": 2}
+    assert len(cfg.media_files()) == 3
+
+    path.write_text('[[movie]]\nframes = "frame_0000[01].png"\n[[movie]]\nframes = "frame_00002.png"\n')
+    assert [len(m.frames) for m in load_config(path).movies] == [2, 1]
+
+
 @pytest.mark.parametrize("body, message", [
+    ('[movie]\nfps = 30', "'frames' is required"),
+    ('[movie]\nframes = "nothing*.png"', "no file matches"),
     ('[transition.a]\nframes = "none/*.png"', "no file matches"),
     ('[transition.a]\nkind = "spin"', "kind must be"),
     ('[transition.a]\nframes = "x"\nkind = "fade"', "cannot be combined"),

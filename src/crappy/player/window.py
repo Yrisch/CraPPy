@@ -19,15 +19,26 @@ from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import QWidget
 
 from crappy.player import scene
-from crappy.player.deck import Deck
+from crappy.player.deck import ClipRef, Deck
 from crappy.player.images import SlideImages
-from crappy.player.timeline import Pos, Timeline
+from crappy.player.movie import MovieDecoder
+from crappy.player.timeline import Blend, Pos, Timeline
 
 K = Qt.Key
 NEXT_KEYS = {K.Key_Right, K.Key_Down, K.Key_PageDown, K.Key_Space, K.Key_N}
 PREV_KEYS = {K.Key_Left, K.Key_Up, K.Key_PageUp, K.Key_Backspace, K.Key_P}
 ENTER_KEYS = {K.Key_Return, K.Key_Enter}
 CURSOR_HIDE_MS = 2000
+# movie frames decoded ahead of the playback position, in the playing direction
+LOOKAHEAD = 12
+
+
+def upcoming_frames(clip: ClipRef, progress: float, direction: int, count: int = LOOKAHEAD) -> list[int]:
+    """Movie frames a clip will show next from `progress`, most urgent first.
+    Its first and last frames are the slides' own backgrounds: never decoded."""
+    k = clip.index(progress)
+    indices = (k + direction * i for i in range(count))
+    return [clip.frame(i) for i in indices if 0 < i < clip.n_frames - 1]
 
 
 def fit(width: float, height: float, outer: QRectF) -> QRectF:
@@ -45,6 +56,10 @@ class Controller:
         self.clock = clock
         self.timeline = Timeline(deck, start)
         self.images = SlideImages(deck)
+        self.decoders = {mid: MovieDecoder(m.video, m.first) for mid, m in deck.movies.items()}
+        self._last_clip_image: dict[ClipRef, object] = {}
+        self.clip_frames_shown = 0
+        self.clip_frames_late = 0           # shown while the exact frame was not decoded yet
         self.blank: QColor | None = None
         self.typed = ""                  # slide number being typed
         self.request_update = lambda: None
@@ -54,7 +69,60 @@ class Controller:
         self._preload()
 
     def _preload(self) -> None:
-        self.images.keep(self.timeline.neighbours())
+        """Keep ready what the screen shows now and what the next key presses may show."""
+        keys = [("composite", p) for p in self.timeline.neighbours()]
+        frames: dict[str, list[int]] = {mid: [] for mid in self.decoders}
+        moves = [(a, b, effect, d, 0.0 if d > 0 else 1.0) for a, b, effect, d in self.timeline.moves()]
+        current = self.timeline.scene(self.clock())
+        if isinstance(current, Blend):
+            moves.insert(0, (current.a, current.b, current.effect, current.direction, current.progress))
+        for a, b, effect, direction, progress in moves:
+            if effect.clip is None:
+                keys += [("composite", a), ("composite", b)]
+                continue
+            keys += [("background", a.slide), ("background", b.slide), ("overlay", a), ("overlay", b)]
+            if effect.clip.movie in frames:
+                frames[effect.clip.movie] += upcoming_frames(effect.clip, progress, direction)
+        self.images.keep(list(dict.fromkeys(keys)))
+        for mid, wanted in frames.items():
+            self.decoders[mid].keep(list(dict.fromkeys(wanted)))
+
+    # --- image provider for scene.draw ---------------------------------------
+
+    def composite(self, pos: Pos):
+        return self.images.get(pos)
+
+    def overlay(self, pos: Pos):
+        return self.images.overlay(pos)
+
+    def clip_background(self, s: Blend):
+        """The movie frame for this progress; never waits for the decoder: when the
+        frame is not ready, the closest earlier one (in playing order) is shown."""
+        clip = s.effect.clip
+        k, last = clip.index(s.progress), clip.n_frames - 1
+        if k == 0:
+            return self.images.background(s.a.slide)
+        if k == last:
+            return self.images.background(s.b.slide)
+        self.clip_frames_shown += 1
+        decoder = self.decoders.get(clip.movie)
+        image = None
+        if decoder is not None:
+            for j in range(0, 30):
+                kk = k - s.direction * j
+                if not 0 < kk < last:
+                    break
+                image = decoder.ready(clip.frame(kk))
+                if image is not None:
+                    if j:
+                        self.clip_frames_late += 1
+                    break
+        if image is None:
+            self.clip_frames_late += 1
+            image = self._last_clip_image.get(clip) or self.images.background(
+                s.a.slide if s.direction > 0 else s.b.slide)
+        self._last_clip_image[clip] = image
+        return image
 
     # --- input ---------------------------------------------------------------
 
@@ -130,10 +198,9 @@ class Controller:
         else:
             target = fit(*self.deck.size, rect)
             current = self.timeline.scene(now)
-            scene.draw(painter, target, current, self.images.get)
+            scene.draw(painter, target, current, self)
             animating = self.timeline.animating(now)
-            if not animating:
-                self._preload()
+            self._preload()
         if self.typed:
             self._draw_typed(painter, rect)
         return animating
@@ -150,6 +217,8 @@ class Controller:
 
     def close(self) -> None:
         self.images.close()
+        for d in self.decoders.values():
+            d.close()
 
 
 class _ViewMixin:

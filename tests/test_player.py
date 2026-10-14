@@ -36,11 +36,18 @@ def to_array(img: QImage) -> np.ndarray:
     return rows[:, :img.width() * 3].reshape(img.height(), img.width(), 3).copy()
 
 
+class Pictures:
+    """Image provider for scene.draw from a dict of composited pictures."""
+
+    def __init__(self, composites):
+        self.composite = composites.__getitem__
+
+
 def render(s, images) -> np.ndarray:
     out = QImage(W, H, QImage.Format.Format_RGB32)
     out.fill(QColor("black"))
     p = QPainter(out)
-    scene.draw(p, QRectF(0, 0, W, H), s, images.__getitem__)
+    scene.draw(p, QRectF(0, 0, W, H), s, Pictures(images))
     p.end()
     return to_array(out)
 

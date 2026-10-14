@@ -9,6 +9,7 @@ from pathlib import Path
 from crappy.build import analyse, build, default_output_dir
 from crappy.config import ConfigError, config_path_for, load_config
 from crappy.odf import OdfPackage
+from crappy.movie import EncodeError
 from crappy.render import RenderError
 
 
@@ -22,11 +23,16 @@ def _size(text: str) -> tuple[int, int]:
 
 def cmd_info(args) -> int:
     odp = Path(args.odp)
-    slides, warnings = analyse(OdfPackage.load(odp), load_config(config_path_for(odp)))
+    analysis = analyse(OdfPackage.load(odp), load_config(config_path_for(odp)))
+    slides, warnings = analysis.slides, analysis.warnings
     for s in slides:
-        t = "clip" if s.clip else s.transition.kind
-        extra = f" {s.transition.duration:g}s" if not s.clip and t != "cut" else ""
-        print(f"{s.number:3d}  {s.name[:45]:45}  steps={s.animation.n_steps}  in={t}{extra}"
+        if s.clip:
+            c = s.clip
+            t = f"clip {c.movie} frames {c.start}->{c.end} ({c.duration:g}s)" if c.end >= 0 else f"clip {c.movie}"
+        else:
+            t = s.transition.kind + (f" {s.transition.duration:g}s" if s.transition.kind != "cut" else "")
+        bg = f"  bg={s.background_image.name}" if s.background_image else ""
+        print(f"{s.number:3d}  {s.name[:40]:40}  steps={s.animation.n_steps}  in={t}{bg}"
               + ("  [hidden]" if s.hidden else ""))
         for w in s.warnings:
             print(f"       warning: {w}")
@@ -105,6 +111,6 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return args.func(args)
-    except (ConfigError, RenderError, FileNotFoundError) as e:
+    except (ConfigError, RenderError, EncodeError, FileNotFoundError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1

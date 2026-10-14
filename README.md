@@ -14,6 +14,7 @@ Each slide becomes two layers:
 ## Requirements
 
 * LibreOffice (`soffice` in `PATH`)
+* ffmpeg (only for movie transitions)
 * Python ≥ 3.11
 
 ```sh
@@ -68,6 +69,32 @@ after 2 s without movement.
 * A darkening layer over a snapshot: draw a semi-transparent black rectangle
   behind the text; its transparency is kept exactly.
 
+## Movie transitions
+
+Render your simulation as a frame sequence (`frame_00000.png`, `frame_00001.png`,
+…). In Impress, set some of these frames as slide backgrounds (Slide
+Properties → Background → Image, *stretched*). Impress remembers the file name
+of a background picture, so CraPPy knows which frame each slide shows. Point the
+side file at the sequence:
+
+```toml
+[movie]
+frames = "../Movie_background/frame_*.png"   # relative to the side file
+fps = 30
+```
+
+Between two consecutive slides whose backgrounds are frames of the movie, the
+transition plays the movie from one frame to the other (backwards if needed):
+`frame_00000` → `frame_00030` is a 1 s clip at 30 fps. The outgoing slide's
+content fades out at the start, the incoming one fades in at the end. Going back
+plays the clip in reverse; keys skip or turn it around like any transition.
+
+`crappy info talk.odp` shows which transitions became clips. The build encodes
+only the frames that are used (H.264, every frame a keyframe, full colour
+resolution: visually lossless, and any frame decodes in a few ms), once: the
+movie is re-encoded only when its frames change. Several sequences: use
+`[[movie]]` tables.
+
 ## Side file `talk.crappy.toml`
 
 Optional, next to `talk.odp`:
@@ -77,11 +104,15 @@ Optional, next to `talk.odp`:
 overlay_out = 0.3          # s, outgoing content fades at clip start
 overlay_in  = 0.5          # s, incoming content fades in at clip end
 
-[transition.halo_zoom]     # transition INTO the slide named "halo_zoom"
-frames = "renders/zoom_halo/*.png"
+[movie]                    # see "Movie transitions"
+frames = "../Movie_background/frame_*.png"
 fps = 30
 
-[transition."Conclusion and Perspectives"]   # override an Impress transition
+[transition.halo_zoom]     # an explicit clip INTO the slide named "halo_zoom"
+frames = "renders/zoom_halo/*.png"   # or: clip = "renders/zoom.mp4"
+fps = 30
+
+[transition."Conclusion and Perspectives"]   # override an Impress (or movie) transition
 kind = "fade_color"
 color = "#000000"
 duration = 1.5
@@ -97,7 +128,7 @@ opacity *a* renders as *R = aC + (1 − a)b*, so *R1 − R2 = (1 − a)(b1 − b
 Text in Impress' *Automatic* colour turns white on dark backgrounds and black
 on light ones, so the two backdrops are picked on the same side as the real
 background: black/blue for dark slides, white/yellow for light ones (they
-differ by 255 in blue, the channel LibreOffice's luminance weighs least).
+differ by 255 in blue, the channel perceived brightness weighs least).
 
 The untouched talk is rendered as well and every rebuilt slide is compared with
 it; a slide that does not match is retried with the other pair of backdrops,

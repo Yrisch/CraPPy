@@ -11,7 +11,7 @@ While an animation runs, a key in the same direction finishes it at once
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from crappy.player.deck import Deck, Effect
 
@@ -33,6 +33,7 @@ class Blend:
     b: Pos
     effect: Effect
     progress: float     # 0 shows a, 1 shows b
+    direction: int = field(default=1, compare=False)    # +1 playing towards b, -1 towards a
 
 
 @dataclass
@@ -88,7 +89,7 @@ class Timeline:
         if (a.direction > 0 and p >= 1) or (a.direction < 0 and p <= 0):
             self.pos, self._anim = a.target, None
             return Still(self.pos)
-        return Blend(a.a, a.b, a.effect, p)
+        return Blend(a.a, a.b, a.effect, p, a.direction)
 
     def neighbours(self) -> list[Pos]:
         """Positions that the next key presses may show: worth preloading."""
@@ -96,6 +97,17 @@ class Timeline:
         for s in (self.pos.slide, self._next_slide(self.pos.slide), self._prev_slide(self.pos.slide)):
             if s is not None:
                 out += [Pos(s, k) for k in range(self.deck.slides[s].n_steps)]
+        return out
+
+    def moves(self) -> list[tuple[Pos, Pos, Effect, int]]:
+        """The animations the next key presses would start: (a, b, effect, direction)."""
+        out = []
+        forward = self._forward_from(self.pos)
+        if forward is not None:
+            out.append((self.pos, forward[0], forward[1], +1))
+        backward = self._backward_from(self.pos)
+        if backward is not None:
+            out.append((backward[0], self.pos, backward[1], -1))
         return out
 
     # --- navigation ----------------------------------------------------------

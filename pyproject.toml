@@ -15,6 +15,7 @@ dependencies = [
     "pillow>=10",
     "pypdfium2>=4.30",
     "PySide6>=6.6",
+    "av>=12",
 ]
 
 [project.optional-dependencies]
