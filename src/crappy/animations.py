@@ -1,10 +1,18 @@
-"""Object animations of a slide -> discrete click steps.
+"""Object animations of a slide: click groups of timed effects.
 
-Impress stores a slide's main sequence as nested <anim:par>; every effect
-carries presentation:node-type (on-click / with-previous / after-previous)
-and presentation:preset-class (entrance / exit / emphasis / motion-path...).
-Each on-click starts a new step; with/after-previous effects join the
-current one. Effects before the first click run at slide start (step 0).
+Impress stores a slide's main sequence as nested <anim:par>:
+
+    main-sequence
+      par (one per click group)
+        par smil:begin="0.102s"        a time slot inside the group
+          par (effect) presentation:node-type="after-previous" smil:begin="0.1s" (the Delay)
+            anim:set / anim:animate / anim:animateMotion / anim:transitionFilter ...
+
+Each on-click effect starts a new group; with-previous / after-previous
+effects join the current one. Impress writes the slot offsets already
+resolved (an after-previous slot begins when the previous one ends), so an
+effect starts at slot begin + its own begin (the Delay). Effects before the
+first click form group 0, which plays by itself when the slide appears.
 """
 
 from __future__ import annotations
@@ -16,26 +24,32 @@ from lxml import etree
 
 from crappy.odf import NS, attr, q
 
-# presets reproduced exactly; any other entrance/exit preset is approximated by a fade
-_CUT_PRESETS = {"ooo-entrance-appear", "ooo-exit-disappear"}
+_SHOW_PRESETS = {"ooo-entrance-appear"}
+_HIDE_PRESETS = {"ooo-exit-disappear"}
 _FADE_PRESETS = {"ooo-entrance-fade-in", "ooo-exit-fade-out"}
-_SUPPORTED_CLASSES = {"entrance", "exit"}
 
 
 @dataclass(frozen=True)
 class Effect:
     target: str              # xml:id of a shape or of a paragraph
     sub_item: str | None     # "text" when only the text of the shape is animated
-    preset_class: str        # entrance / exit
+    preset_class: str        # entrance / exit / motion-path
     preset_id: str
     duration: float          # seconds
+    kind: str = "show"       # show | hide | fade_in | fade_out | motion
+    start: float = 0.0       # seconds after the click (or after the slide appeared, group 0)
+    path: str | None = None  # motion: SVG path, in fractions of the slide size, relative to the object
+    accelerate: float = 0.0
+    decelerate: float = 0.0
 
+    @property
+    def unit(self) -> tuple[str, str | None]:
+        """What gets animated: a shape, a paragraph, or the text of a shape."""
+        return self.target, self.sub_item
 
-@dataclass
-class StepEffect:
-    """How the slide content changes when entering a step."""
-    kind: str = "cut"        # cut | fade
-    duration: float = 0.0
+    @property
+    def end(self) -> float:
+        return self.start + self.duration
 
 
 @dataclass
@@ -48,24 +62,38 @@ class SlideAnimation:
         return len(self.groups)
 
     @property
-    def has_exit(self) -> bool:
-        return any(e.preset_class == "exit" for g in self.groups for e in g)
+    def auto_start(self) -> bool:
+        """Effects play by themselves when the slide appears (before the first click)."""
+        return bool(self.groups[0])
+
+    @property
+    def units(self) -> list[tuple[str, str | None]]:
+        """Animated things, in order of first appearance in the sequence."""
+        return list(dict.fromkeys(e.unit for g in self.groups for e in g))
+
+    def initially_visible(self, unit) -> bool:
+        """Visible before any effect has played: unless its first effect is an entrance."""
+        for g in self.groups:
+            for e in g:
+                if e.unit == unit and e.kind in ("show", "fade_in", "hide", "fade_out"):
+                    return e.kind in ("hide", "fade_out")
+        return True
 
     def hidden_at(self, step: int) -> set[tuple[str, str | None]]:
-        """(target, sub_item) pairs that must be invisible at the given step."""
+        """(target, sub_item) pairs invisible once the effects of groups 0..step have played."""
         hidden = set()
-        for i, group in enumerate(self.groups):
-            for e in group:
-                if (e.preset_class == "entrance" and i > step) or (e.preset_class == "exit" and i <= step):
-                    hidden.add((e.target, e.sub_item))
+        for unit in self.units:
+            visible = self.initially_visible(unit)
+            for g in self.groups[:step + 1]:
+                for e in sorted(g, key=lambda e: e.start):
+                    if e.unit == unit and e.kind != "motion":
+                        visible = e.kind in ("show", "fade_in")
+            if not visible:
+                hidden.add(unit)
         return hidden
 
-    def step_effect(self, step: int) -> StepEffect:
-        group = self.groups[step] if step < len(self.groups) else []
-        if step == 0 or not group or all(e.preset_id in _CUT_PRESETS for e in group):
-            return StepEffect()
-        fades = [e.duration for e in group if e.preset_id not in _CUT_PRESETS]
-        return StepEffect("fade", max(fades) if fades else 0.0)
+    def group_duration(self, step: int) -> float:
+        return max((e.end for e in self.groups[step]), default=0.0)
 
 
 def parse_duration(value: str | None) -> float:
@@ -90,6 +118,13 @@ def _effect_duration(effect_par: etree._Element) -> float:
     return longest
 
 
+def _float(value: str | None) -> float:
+    try:
+        return float(value) if value else 0.0
+    except ValueError:
+        return 0.0
+
+
 def parse_slide_animation(page: etree._Element) -> SlideAnimation:
     anim = SlideAnimation()
     root = page.find("anim:par[@presentation:node-type='timing-root']", NS)
@@ -106,20 +141,31 @@ def parse_slide_animation(page: etree._Element) -> SlideAnimation:
             anim.groups.append([])
         cls = attr(effect_par, "presentation:preset-class")
         preset = attr(effect_par, "presentation:preset-id", "")
-        if cls not in _SUPPORTED_CLASSES:
-            anim.warnings.append(f"{cls} effect '{preset}' ignored (only entrance/exit are supported)")
-            continue
-        if preset not in _CUT_PRESETS | _FADE_PRESETS:
-            anim.warnings.append(f"{cls} effect '{preset}' approximated by a fade")
         node = effect_par.find(".//*[@smil:targetElement]", NS)
         if node is None:
             anim.warnings.append(f"{cls} effect '{preset}' has no target, ignored")
             continue
-        anim.groups[-1].append(Effect(
-            target=node.get(q("smil:targetElement")),
-            sub_item=node.get(q("anim:sub-item")),
-            preset_class=cls,
-            preset_id=preset,
-            duration=_effect_duration(effect_par),
-        ))
+        slot = effect_par.getparent()
+        start = parse_duration(slot.get(q("smil:begin"))) + parse_duration(effect_par.get(q("smil:begin")))
+        common = dict(target=node.get(q("smil:targetElement")), sub_item=node.get(q("anim:sub-item")),
+                      preset_class=cls, preset_id=preset, duration=_effect_duration(effect_par), start=start)
+        if cls == "motion-path":
+            motion = effect_par.find(".//anim:animateMotion", NS)
+            if motion is None or not motion.get(q("svg:path")):
+                anim.warnings.append(f"motion path '{preset}' without a path, ignored")
+                continue
+            accel = effect_par.get(q("smil:accelerate")) or motion.get(q("smil:accelerate"))
+            decel = effect_par.get(q("smil:decelerate")) or motion.get(q("smil:decelerate"))
+            anim.groups[-1].append(Effect(**common, kind="motion", path=motion.get(q("svg:path")),
+                                          accelerate=_float(accel), decelerate=_float(decel)))
+        elif cls in ("entrance", "exit"):
+            if preset in _SHOW_PRESETS or preset in _HIDE_PRESETS:
+                kind = "show" if cls == "entrance" else "hide"
+            else:
+                kind = "fade_in" if cls == "entrance" else "fade_out"
+                if preset not in _FADE_PRESETS:
+                    anim.warnings.append(f"{cls} effect '{preset}' approximated by a fade")
+            anim.groups[-1].append(Effect(**common, kind=kind))
+        else:
+            anim.warnings.append(f"{cls} effect '{preset}' ignored (entrance, exit and motion paths are supported)")
     return anim

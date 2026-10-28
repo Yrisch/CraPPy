@@ -35,8 +35,13 @@ def built(tmp_path_factory):
     return manifest, tmp / "out"
 
 
-def _alpha(out, path):
-    return np.asarray(Image.open(out / path))[..., 3].astype(int)
+def _steps(out, number):
+    """Every click step of a slide, composed (background + layers at the end of the step)."""
+    from crappy.player.deck import Deck
+    from crappy.preview import compose
+    deck = Deck.load(out / "manifest.json")
+    slide = deck.slides[number - 1]
+    return [compose(slide, k, deck.size).astype(int) for k in range(slide.n_steps)]
 
 
 def test_manifest(built):
@@ -45,7 +50,12 @@ def test_manifest(built):
     assert (dark["name"], len(dark["steps"]), dark["transition"]["kind"]) == ("dark", 1, "cut")
     assert steps["transition"] == {"kind": "fade", "duration": 1.0, "source": "libreoffice",
                                    "lo_type": "fade/crossfade"}
-    assert [s["effect"]["kind"] for s in steps["steps"]] == ["cut", "cut", "fade"]
+    assert [len(s["events"]) for s in steps["steps"]] == [0, 1, 1]
+    assert [e["kind"] for s in steps["steps"] for e in s["events"]] == ["show", "fade_in"]
+    assert steps["steps"][2]["duration"] == 0.5
+    # one base layer (master + static text), the rectangle and the third bullet on their own
+    assert [layer["unit"] is None for layer in steps["layers"]] == [True, False, False]
+    assert all(not u["visible"] for u in steps["units"].values())
     assert not manifest["warnings"] and not dark["warnings"] and not steps["warnings"]
 
 
@@ -56,7 +66,7 @@ def test_background_classes(built):
 
 def test_automatic_text_colour_follows_background(built):
     manifest, out = built
-    dark = np.asarray(Image.open(out / manifest["slides"][0]["steps"][0]["overlay"]))
+    dark = np.asarray(Image.open(out / manifest["slides"][0]["layers"][0]["file"]))
     text = dark[..., 3] > 250
     assert text.sum() > 50 and dark[text][:, :3].min() > 240         # white text on the black slide
 
@@ -75,27 +85,28 @@ def test_backgrounds(built):
 
 
 def test_click_steps(built):
-    manifest, out = built
-    s0, s1, s2 = (_alpha(out, st["overlay"]) for st in manifest["slides"][1]["steps"])
+    _, out = built
+    s0, s1, s2 = _steps(out, 2)                           # white slide
     rect, lst = _box(RECT_BOX), _box(LIST_BOX)
+    differs = lambda a, b: np.abs(a - b).max(-1) > 2      # noqa: E731
 
-    # transparent outside the content
-    assert s0[-20:, :].max() == 0
-    # click 1: only the rectangle appears, fully opaque inside its anti-aliased edges
-    assert s0[rect].max() == 0 and s1[rect][2:-2, 2:-2].min() == 255
-    changed = s0 != s1
+    # click 1: only the rectangle appears, red inside its anti-aliased edges
+    assert s0[rect].min() > 245
+    inside = s1[rect][2:-2, 2:-2]
+    assert (inside[..., 0] > 245).all() and (inside[..., 1:] < 10).all()
+    changed = differs(s0, s1)
     changed[rect] = False
     assert not changed.any()
     # click 2: something appears in the list box (bullet 3) and nowhere else
-    changed = s1 != s2
+    changed = differs(s1, s2)
     assert changed[lst].sum() > 100
     changed[lst] = False
     assert not changed.any()
     # bullets 1-2 are visible from the start and do not move
-    rows = np.flatnonzero(s1[lst].max(axis=1) > 0)
-    first_new = np.flatnonzero((s2[lst] != s1[lst]).any(axis=1))[0]
+    rows = np.flatnonzero(differs(s1[lst], 255).any(axis=1))
+    first_new = np.flatnonzero(differs(s2[lst], s1[lst]).any(axis=1))[0]
     assert rows[0] < first_new
-    assert (s0[lst][:first_new] == s2[lst][:first_new]).all()
+    assert not differs(s0[lst][:first_new], s2[lst][:first_new]).any()
 
 
 def test_cache(built, tmp_path):

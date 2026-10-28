@@ -1,3 +1,4 @@
+import pytest
 from fixtures import make_package
 
 from crappy.animations import parse_duration, parse_slide_animation
@@ -33,20 +34,52 @@ def test_hidden_targets_per_step():
     assert anim.hidden_at(2) == set()
 
 
-def test_step_effects():
+def test_effect_kinds_and_timing():
     anim = parse_slide_animation(make_package().pages()[1])
-    assert anim.step_effect(0).kind == "cut"
-    assert anim.step_effect(1).kind == "cut"            # appear
-    eff = anim.step_effect(2)                            # fade-in, 0.5 s
-    assert (eff.kind, eff.duration) == ("fade", 0.5)
+    appear, fade = anim.groups[1][0], anim.groups[2][0]
+    assert (appear.kind, appear.start) == ("show", 0.0)
+    assert (fade.kind, fade.duration) == ("fade_in", 0.5)
+    assert anim.group_duration(2) == 0.5 and not anim.auto_start
+    assert anim.units == [("r1", None), ("p3", "text")]
+    assert not anim.initially_visible(("r1", None))
 
 
 def test_exit_effect_hides_from_its_step():
     from crappy.animations import Effect, SlideAnimation
-    anim = SlideAnimation(groups=[[], [Effect("a", None, "exit", "ooo-exit-disappear", 0)]])
+    anim = SlideAnimation(groups=[[], [Effect("a", None, "exit", "ooo-exit-disappear", 0, kind="hide")]])
     assert anim.hidden_at(0) == set()
     assert anim.hidden_at(1) == {("a", None)}
-    assert anim.has_exit
+    assert anim.initially_visible(("a", None))
+
+
+def _effect(node_type, cls, preset, begin, body, slot="0s"):
+    return (f'<anim:par smil:begin="{slot}"><anim:par smil:begin="{begin}" smil:fill="hold" '
+            f'presentation:node-type="{node_type}" presentation:preset-class="{cls}" '
+            f'presentation:preset-id="{preset}" smil:accelerate="0.5" smil:decelerate="0.5">{body}</anim:par></anim:par>')
+
+
+def test_delays_motion_paths_and_slide_start_effects():
+    """Effects before the first click (group 0), after-previous slots with a Delay, motion paths."""
+    from lxml import etree
+
+    from crappy.odf import NS
+    show = '<anim:set smil:begin="0s" smil:dur="0.001s" smil:targetElement="{t}" smil:attributeName="visibility" smil:to="visible"/>'
+    move = '<anim:animateMotion smil:dur="2s" smil:targetElement="b" svg:path="M0 0 L0.5 0"/>'
+    xml = (f'<draw:page {" ".join(f"xmlns:{k}={chr(34)}{v}{chr(34)}" for k, v in NS.items() if k != "xml")}>'
+           '<draw:rect xml:id="a"/><draw:rect xml:id="b"/>'
+           '<anim:par presentation:node-type="timing-root"><anim:seq presentation:node-type="main-sequence">'
+           '<anim:par smil:begin="0s">' + _effect("after-previous", "entrance", "ooo-entrance-appear", "0.5s",
+                                                 show.format(t="a")) + '</anim:par>'
+           '<anim:par smil:begin="next">'
+           + _effect("on-click", "motion-path", "libo-motionpath-curve", "0s", move)
+           + _effect("after-previous", "entrance", "ooo-entrance-appear", "0.25s", show.format(t="a"), slot="2s")
+           + '</anim:par></anim:seq></anim:par></draw:page>')
+    anim = parse_slide_animation(etree.fromstring(xml))
+    assert anim.auto_start and anim.groups[0][0].start == 0.5
+    motion, after = anim.groups[1]
+    assert (motion.kind, motion.path, motion.duration, motion.accelerate) == ("motion", "M0 0 L0.5 0", 2.0, 0.5)
+    assert after.start == pytest.approx(2.25)                   # slot 2 s (after the motion) + Delay 0.25 s
+    assert anim.group_duration(1) == pytest.approx(2.251)
 
 
 def test_transition_from_page_style_and_timing():

@@ -7,6 +7,10 @@ same animation from 1 to 0, so going back replays transitions in reverse.
 
 While an animation runs, a key in the same direction finishes it at once
 (skip), a key in the opposite direction turns it around from where it is.
+
+A click step marked `auto` (effects set to play before the first click) starts
+by itself when the step before it is reached going forwards, and is rewound
+by itself going backwards: that step before it is never a resting place.
 """
 
 from __future__ import annotations
@@ -60,7 +64,7 @@ class Timeline:
         visible = self._visible()
         if not visible:
             raise ValueError("the talk has no visible slide")
-        self.pos = start or Pos(visible[0], 0)
+        self.pos = self._settled(start or Pos(visible[0], 0))
         self._anim: _Animation | None = None
 
     # --- queries -------------------------------------------------------------
@@ -81,15 +85,39 @@ class Timeline:
         self.scene(now)
         return self._anim is not None
 
+    def _auto(self, slide: int, step: int) -> bool:
+        steps = self.deck.slides[slide].steps
+        return 0 <= step < len(steps) and steps[step].auto
+
+    def settled(self, pos: Pos) -> Pos:
+        return self._settled(pos)
+
+    def _settled(self, pos: Pos) -> Pos:
+        """Skip over steps that are only the starting point of an automatic one."""
+        while self._auto(pos.slide, pos.step + 1):
+            pos = Pos(pos.slide, pos.step + 1)
+        return pos
+
     def scene(self, now: float) -> Still | Blend:
         a = self._anim
-        if a is None:
-            return Still(self.pos)
-        p = a.progress(now)
-        if (a.direction > 0 and p >= 1) or (a.direction < 0 and p <= 0):
+        while a is not None:
+            p = a.progress(now)
+            if not ((a.direction > 0 and p >= 1) or (a.direction < 0 and p <= 0)):
+                return Blend(a.a, a.b, a.effect, p, a.direction)
+            # finished: chain the automatic step that follows (or precedes, going back)
+            ended = a.t0 + (1 - a.p0 if a.direction > 0 else a.p0) * a.effect.duration
             self.pos, self._anim = a.target, None
-            return Still(self.pos)
-        return Blend(a.a, a.b, a.effect, p, a.direction)
+            nxt = None
+            if a.direction > 0 and self._auto(self.pos.slide, self.pos.step + 1):
+                nxt = self._forward_from(self.pos)
+                if nxt is not None:
+                    self._start(self.pos, nxt[0], nxt[1], 0.0, +1, ended)
+            elif a.direction < 0 and self._auto(self.pos.slide, self.pos.step + 1):
+                nxt = self._backward_from(self.pos)
+                if nxt is not None:
+                    self._start(nxt[0], self.pos, nxt[1], 1.0, -1, ended)
+            a = self._anim
+        return Still(self.pos)
 
     def neighbours(self) -> list[Pos]:
         """Positions that the next key presses may show: worth preloading."""
@@ -165,7 +193,7 @@ class Timeline:
 
     def goto(self, slide: int, now: float, step: int = 0) -> None:
         self._anim = None
-        self.pos = Pos(slide, max(0, min(step, self.deck.slides[slide].n_steps - 1)))
+        self.pos = self._settled(Pos(slide, max(0, min(step, self.deck.slides[slide].n_steps - 1))))
 
     def first(self, now: float) -> None:
         self.goto(self._visible()[0], now)

@@ -10,8 +10,12 @@ Transitions work on whole composited slides A and B:
   clip        the movie plays as background; A's content fades out at the start,
               B's content fades in at the end
 
-`images` provides: composite(pos) (background + overlay), overlay(pos), and
-clip_background(blend) (the movie frame to show, never blocking).
+  timeline    a click step playing: each animated object shown, faded or moved
+              following its effects
+
+`images` provides: composite(pos) (background + layers), overlay(pos),
+clip_background(blend) (the movie frame to show, never blocking), and for
+timelines slide_info(i), background(i), layers(i) and canvas (size in pixels).
 """
 
 from __future__ import annotations
@@ -19,6 +23,8 @@ from __future__ import annotations
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QPainter
 
+from crappy.player.animate import layer_states
+from crappy.player.images import paint_layers
 from crappy.player.timeline import Blend, Still
 
 # unit vector pointing from the centre of the screen towards a side
@@ -38,9 +44,20 @@ def draw(painter: QPainter, target: QRectF, scene: Still | Blend, images) -> Non
         painter.drawImage(target, images.composite(scene.pos))
     elif scene.effect.kind == "clip" and scene.effect.clip is not None:
         _draw_clip(painter, target, scene, images)
+    elif scene.effect.kind == "timeline":
+        _draw_timeline(painter, target, scene, images)
     else:
         _draw_blend(painter, target, scene, images.composite(scene.a), images.composite(scene.b))
     painter.restore()
+
+
+def _draw_timeline(painter: QPainter, r: QRectF, s: Blend, images) -> None:
+    pos = s.b                                   # the step being played (same slide as s.a)
+    slide = images.slide_info(pos.slide)
+    t = s.progress * slide.steps[pos.step].duration
+    painter.drawImage(r, images.background(pos.slide))
+    paint_layers(painter, images.layers(pos.slide), slide, layer_states(slide, pos.step, t),
+                 r.width() / images.canvas[0], r.topLeft())
 
 
 def _draw_clip(painter: QPainter, r: QRectF, s: Blend, images) -> None:

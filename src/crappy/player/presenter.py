@@ -140,7 +140,7 @@ def paint_presenter(painter: QPainter, rect: QRectF, c: Controller, wall_clock=t
         painter.setPen(DIM)
         painter.drawText(nxt_box, Qt.AlignmentFlag.AlignCenter, "end")
     else:
-        painter.drawImage(nxt_box, c.composite(upcoming[0]))
+        painter.drawImage(nxt_box, c.composite(tl.settled(upcoming[0])))
 
     # --- notes ---------------------------------------------------------------------
     notes_box = QRectF(right_x, nxt_box.bottom() + m, right_w, rect.bottom() - m - nxt_box.bottom() - m)

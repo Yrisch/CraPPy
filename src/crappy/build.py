@@ -1,11 +1,14 @@
-"""`crappy build`: an .odp -> per-slide background + per-step transparent overlays.
+"""`crappy build`: an .odp -> per-slide background + transparent content layers + effect timing.
 
 Render passes (each one a whole-document LibreOffice PDF export, run in parallel):
   reference        the untouched talk: self-check of every rebuilt slide
   background       objects removed: what Impress draws as background
-  step k / pair i  slides frozen at click step k over backdrop i of their pair
-                   (crappy.background.BACKDROPS) -> difference matting.
-                   Steps k > 0 only export the slides that have that many steps.
+  base / pair i    every slide reduced to its base layer (crappy.layers), over
+                   backdrop i of its pair (crappy.background.BACKDROPS)
+  extra / pair i   one extra slide per other layer (animated objects, static
+                   slices between them), over the same backdrops
+Each layer comes out of the two backdrop renders by difference matting; the
+player shows, fades and moves the animated ones following the effects' timing.
 
 A slide whose rebuild does not match the reference is retried with the other
 backdrop pair (its background was classified on the wrong side of
@@ -35,10 +38,12 @@ from crappy.matte import over, unmatte
 from crappy.odf import NS, OdfPackage, attr, plain_text
 from crappy.render import ExportJob, PdfRaster, export_pdfs
 from crappy.transitions import Transition, parse_transition
-from crappy.variants import StepHider, set_page_backdrops, strip_to_background
+from crappy.layers import SlidePlan, make_base, make_extra, page_size_cm, plan_slide
+from crappy.motion import PathError, flatten, resample
+from crappy.variants import set_page_backdrops, strip_to_background
 
 MANIFEST = "manifest.json"
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 # self-check: a pixel "differs" from LibreOffice's own render above this level (0-255),
 # and a slide fails when more than this fraction of its pixels differ
 CHECK_TOLERANCE = 24
@@ -90,13 +95,6 @@ class Analysis:
     slides: list[SlideInfo]
     movies: dict[str, MovieSource]
     warnings: list[str]
-
-
-@dataclass
-class Rebuilt:
-    background_class: str
-    overlays: list[np.ndarray]
-    mismatch: float | None           # None when the slide cannot be checked (exit effects)
 
 
 def default_output_dir(odp: Path) -> Path:
@@ -283,24 +281,23 @@ class _Renderer:
         variant.save(path)
         self.jobs[name] = ExportJob(path, pages)
 
-    def add_steps(self, prefix: str, classes: dict[int, str]) -> None:
-        """Variants 'prefix_step{k}_{i}' for the slides in `classes` (number -> background class)."""
-        max_steps = max(self.slides[n - 1].animation.n_steps for n in classes)
-        for k in range(max_steps):
-            numbers = [n for n in classes if self.slides[n - 1].animation.n_steps > k]
-            for i in (0, 1):
-                v = self.pkg.copy()
-                set_page_backdrops(v, {n - 1: BACKDROPS[classes[n]][i] for n in numbers})
-                hider = StepHider(v)
-                pages = v.pages()
-                for n in numbers:
-                    before = len(hider.warnings)
-                    hider.apply(pages[n - 1], self.slides[n - 1].animation, k)
-                    for w in hider.warnings[before:]:
-                        if w not in self.slides[n - 1].warnings:
-                            self.slides[n - 1].warnings.append(w)
-                full = len(numbers) == len(self.slides)
-                self.add(f"{prefix}_step{k}_{i}", v, None if full else numbers)
+    def add_layers(self, prefix: str, plans: dict[int, SlidePlan], classes: dict[int, str]) -> dict:
+        """Exports '{prefix}_base_{i}' and '{prefix}_extra_{i}' (i: backdrop of the pair) for the
+        slides in `classes` (number -> background class). Returns {(number, layer index): extra page}."""
+        numbers = sorted(classes)
+        n_pages = len(self.slides)
+        base = make_base(self.pkg, {n: plans[n] for n in numbers})
+        extra_pkg, extra = make_extra(self.pkg, {n: plans[n] for n in numbers if plans[n].animated})
+        extra_pages = {key: n_pages + 1 + j for j, key in enumerate(extra)}
+        for i in (0, 1):
+            b = base.copy()
+            set_page_backdrops(b, {n - 1: BACKDROPS[classes[n]][i] for n in numbers})
+            self.add(f"{prefix}_base_{i}", b, None if len(numbers) == n_pages else numbers)
+            if extra:
+                e = extra_pkg.copy()
+                set_page_backdrops(e, {page - 1: BACKDROPS[classes[n]][i] for (n, _), page in extra_pages.items()})
+                self.add(f"{prefix}_extra_{i}", e, list(extra_pages.values()))
+        return extra_pages
 
     def run(self) -> None:
         pending = [name for name in self.jobs if name not in self.rasters]
@@ -323,16 +320,72 @@ class _Renderer:
             r.close()
 
 
-def _rebuild(r: _Renderer, prefix: str, s: SlideInfo, cls: str, background, reference) -> Rebuilt:
+@dataclass
+class Rebuilt:
+    background_class: str
+    layers: list[np.ndarray]          # full-size RGBA, in stacking order (same order as plan.layers)
+    mismatch: float
+
+
+def _rebuild(r: _Renderer, prefix: str, s: SlideInfo, plan: SlidePlan, extra_pages: dict, cls: str,
+             background, reference) -> Rebuilt:
     b1, b2 = (hex_to_rgb(c) for c in BACKDROPS[cls])
-    overlays = [unmatte(r.page(f"{prefix}_step{k}_0", s.number), r.page(f"{prefix}_step{k}_1", s.number), b1, b2)
-                for k in range(s.animation.n_steps)]
-    mismatch = None
-    if not s.animation.has_exit:
-        # the last step shows every object, as LibreOffice's own export does
-        diff = np.abs(over(overlays[-1], background).astype(np.int16) - reference).max(-1)
-        mismatch = float((diff > CHECK_TOLERANCE).mean())
-    return Rebuilt(cls, overlays, mismatch)
+
+    def matte(name: str, page: int) -> np.ndarray:
+        return unmatte(r.page(f"{name}_0", page), r.page(f"{name}_1", page), b1, b2)
+
+    layers = [matte(f"{prefix}_base", s.number)]
+    for index in range(1, len(plan.layers)):
+        layers.append(matte(f"{prefix}_extra", extra_pages[(s.number, index)]))
+    # every layer at its place, everything visible: what LibreOffice's own export shows
+    composite = background
+    for layer in layers:
+        composite = over(layer, composite)
+    diff = np.abs(composite.astype(np.int16) - reference).max(-1)
+    return Rebuilt(cls, layers, float((diff > CHECK_TOLERANCE).mean()))
+
+
+def _crop(layer: np.ndarray) -> tuple[np.ndarray, int, int] | None:
+    alpha = layer[..., 3]
+    rows, cols = np.flatnonzero(alpha.any(1)), np.flatnonzero(alpha.any(0))
+    if rows.size == 0:
+        return None
+    y0, y1, x0, x1 = rows[0], rows[-1] + 1, cols[0], cols[-1] + 1
+    return layer[y0:y1, x0:x1], int(x0), int(y0)
+
+
+def _steps_json(s: SlideInfo, plan: SlidePlan, page_px: tuple[float, float]) -> list[dict]:
+    """Click steps with their timed effects. Effects before the first click become an
+    automatic step after an initial one (state before they play)."""
+    uid = {(u.target, u.sub_item): u.uid for u in plan.units}
+
+    def events(group) -> list[dict]:
+        out = []
+        for e in sorted(group, key=lambda e: e.start):
+            if e.unit not in uid:
+                continue
+            ev = {"unit": uid[e.unit], "kind": e.kind, "start": round(e.start, 4), "duration": round(e.duration, 4)}
+            if e.kind == "motion":
+                try:
+                    points = resample(flatten(e.path), page_px)
+                except PathError as err:
+                    s.warnings.append(f"motion path ignored: {err}")
+                    continue
+                ev |= {"points": [[round(x, 2), round(y, 2)] for x, y in points],
+                       "accelerate": e.accelerate, "decelerate": e.decelerate}
+            out.append(ev)
+        return out
+
+    def step(group, auto=False) -> dict:
+        evs = events(group)
+        return {"auto": auto, "duration": round(max((e["start"] + e["duration"] for e in evs), default=0.0), 4),
+                "events": evs}
+
+    groups = s.animation.groups
+    steps = [step([])]
+    if s.animation.auto_start:
+        steps.append(step(groups[0], auto=True))
+    return steps + [step(g) for g in groups[1:]]
 
 
 def build(odp: Path, out_dir: Path | None = None, size: tuple[int, int] = (1920, 1080),
@@ -362,12 +415,19 @@ def build(odp: Path, out_dir: Path | None = None, size: tuple[int, int] = (1920,
     work.mkdir(parents=True)
     r = _Renderer(pkg, slides, work, size, workers, log)
 
+    plans = {s.number: plan_slide(pages[s.number - 1], s.animation, s.number) for s in slides}
+    for s in slides:
+        s.warnings += plans[s.number].warnings
+    w_cm, h_cm = page_size_cm(pkg)
+    scale = min(size[0] / w_cm, size[1] / h_cm)
+    page_px = (w_cm * scale, h_cm * scale)
+
     r.add("reference", pkg.copy(), None)
     bg = pkg.copy()
     strip_to_background(bg)
     r.add("background", bg, None)
-    r.add_steps("main", classes)
-    log(f"{odp.name}: {len(slides)} slides, up to {max(s.animation.n_steps for s in slides)} click steps, "
+    extra_pages = r.add_layers("main", plans, classes)
+    log(f"{odp.name}: {len(slides)} slides, {sum(len(p.units) for p in plans.values())} animated objects, "
         f"{len(r.jobs)} LibreOffice exports")
 
     slide_entries = []
@@ -378,35 +438,38 @@ def build(odp: Path, out_dir: Path | None = None, size: tuple[int, int] = (1920,
         movies = movies_job.result()
         backgrounds = {s.number: r.page("background", s.number) for s in slides}
         references = {s.number: r.page("reference", s.number) for s in slides}
-        results = {s.number: _rebuild(r, "main", s, classes[s.number], backgrounds[s.number], references[s.number])
-                   for s in slides}
+        results = {s.number: _rebuild(r, "main", s, plans[s.number], extra_pages, classes[s.number],
+                                      backgrounds[s.number], references[s.number]) for s in slides}
 
         retry = {n: other_class(res.background_class) for n, res in results.items()
-                 if res.mismatch is not None and res.mismatch > CHECK_MAX_FRACTION}
+                 if res.mismatch > CHECK_MAX_FRACTION}
         if retry:
             log(f"  slide(s) {sorted(retry)} do not match LibreOffice's render: retrying with the other backdrops")
-            r.add_steps("retry", retry)
+            retry_pages = r.add_layers("retry", plans, retry)
             r.run()
             for n, cls in retry.items():
-                s = slides[n - 1]
-                other = _rebuild(r, "retry", s, cls, backgrounds[n], references[n])
+                other = _rebuild(r, "retry", slides[n - 1], plans[n], retry_pages, cls, backgrounds[n], references[n])
                 if other.mismatch < results[n].mismatch:
                     results[n] = other
 
         for s in slides:
-            res = results[s.number]
-            if res.mismatch is not None and res.mismatch > CHECK_MAX_FRACTION:
+            res, plan = results[s.number], plans[s.number]
+            if res.mismatch > CHECK_MAX_FRACTION:
                 s.warnings.append(f"rebuilt slide differs from LibreOffice's render on {res.mismatch:.2%} of pixels")
             rel = Path("slides") / f"{s.number:03d}"
             original = _original_background(s, size)
             _check_movie_frame(s, analysis, original, size)
             _save_png(out_dir / rel / "background.png", backgrounds[s.number] if original is None else original)
-            steps = []
-            for k, overlay in enumerate(res.overlays):
-                _save_png(out_dir / rel / f"step{k}.png", overlay)
-                eff = s.animation.step_effect(k)
-                steps.append({"overlay": str(rel / f"step{k}.png"),
-                              "effect": {"kind": eff.kind, "duration": eff.duration}})
+            layers = []
+            for index, (layer, rgba) in enumerate(zip(plan.layers, res.layers)):
+                cropped = _crop(rgba)
+                if cropped is None:
+                    continue
+                pixels, x, y = cropped
+                _save_png(out_dir / rel / f"layer{index:03d}.png", pixels)
+                layers.append({"file": str(rel / f"layer{index:03d}.png"), "x": x, "y": y, "unit": layer.unit})
+            steps = _steps_json(s, plan, page_px)
+            units = {u.uid: {"visible": s.animation.initially_visible((u.target, u.sub_item))} for u in plan.units}
 
             transition = s.transition.to_json()
             if s.clip is not None:
@@ -418,12 +481,12 @@ def build(odp: Path, out_dir: Path | None = None, size: tuple[int, int] = (1920,
                               "overlay_out": c.overlay_out, "source": c.source}
             slide_entries.append({
                 "number": s.number, "name": s.name, "hidden": s.hidden, "notes": s.notes,
-                "background": str(rel / "background.png"), "steps": steps,
+                "background": str(rel / "background.png"), "layers": layers, "units": units, "steps": steps,
                 "transition": transition, "background_class": res.background_class,
                 "check_mismatch": res.mismatch, "warnings": s.warnings,
             })
-            check = "" if res.mismatch is None else f"  check {res.mismatch:.3%}"
-            log(f"  slide {s.number:3d} {s.name[:40]!r:44} {len(steps)} step(s)  {transition['kind']}{check}")
+            log(f"  slide {s.number:3d} {s.name[:40]!r:44} {len(steps)} step(s) {len(units):3d} animated  "
+                f"{transition['kind']}  check {res.mismatch:.3%}")
     finally:
         r.close()
         encoder.shutdown(wait=True)

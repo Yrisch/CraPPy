@@ -107,19 +107,26 @@ def deck(tmp_path):
         return name
 
     bg = save("bg.png", np.zeros((H, W, 3)))
-    clear = np.zeros((H, W, 4))
-    dot = clear.copy()
-    dot[10:20, 10:20] = (255, 255, 255, 255)
+    # a white dot (10 x 10 at 10, 10) appearing on click, then a red square moving 30 px right in 1 s
+    dot = save("dot.png", np.full((10, 10, 4), 255))
+    square = save("square.png", np.broadcast_to(np.array([255, 0, 0, 255]), (6, 6, 4)))
+    idle = {"auto": False, "duration": 0, "events": []}
     slides = [
         {"number": 1, "name": "one", "hidden": False, "notes": "Say hello\nthen the dot", "background": bg,
-         "steps": [{"overlay": save("o1.png", clear), "effect": {"kind": "cut", "duration": 0}},
-                   {"overlay": save("o2.png", dot), "effect": {"kind": "cut", "duration": 0}}],
+         "layers": [{"file": dot, "x": 10, "y": 10, "unit": "dot"}, {"file": square, "x": 2, "y": 26, "unit": "sq"}],
+         "units": {"dot": {"visible": False}, "sq": {"visible": True}},
+         "steps": [idle,
+                   {"auto": False, "duration": 0.0,
+                    "events": [{"unit": "dot", "kind": "show", "start": 0, "duration": 0.001}]},
+                   {"auto": False, "duration": 1.0,
+                    "events": [{"unit": "sq", "kind": "motion", "start": 0, "duration": 1.0,
+                                "points": [[0, 0], [15, 0], [30, 0]]}]}],
          "transition": {"kind": "cut"}},
-        {"number": 2, "name": "two", "hidden": False, "notes": "", "background": save("bg2.png", np.full((H, W, 3), 255)),
-         "steps": [{"overlay": "o1.png", "effect": {"kind": "cut", "duration": 0}}],
+        {"number": 2, "name": "two", "hidden": False, "notes": "",
+         "background": save("bg2.png", np.full((H, W, 3), 255)), "layers": [], "units": {}, "steps": [idle],
          "transition": {"kind": "fade", "duration": 1.0}},
     ]
-    (tmp_path / "manifest.json").write_text(json.dumps({"size": [W, H], "slides": slides}))
+    (tmp_path / "manifest.json").write_text(json.dumps({"format": 2, "size": [W, H], "slides": slides}))
     return Deck.load(tmp_path / "manifest.json")
 
 
@@ -142,6 +149,14 @@ def test_controller_keys_and_painting(app, deck):
     assert grab(view)[15, 15].max() == 0                 # step 0: dot not there yet
     c.key(Qt.Key.Key_Space)
     assert grab(view)[15, 15].min() == 255               # click: dot appears
+    assert tuple(grab(view)[28, 4]) == (255, 0, 0)       # the square, where it sits on the slide
+    c.key(Qt.Key.Key_Space)                              # click: the square moves 30 px right in 1 s
+    clock.t = 0.5
+    half = grab(view)
+    assert half[28, 4].max() == 0 and tuple(half[28, 19]) == (255, 0, 0)
+    clock.t = 1.0
+    assert tuple(grab(view)[28, 34]) == (255, 0, 0)      # arrived, and stays there
+    clock.t = 0.0
     c.key(Qt.Key.Key_Right)                              # fade to slide 2
     clock.t = 0.5
     assert 100 < grab(view)[2, 2, 0] < 160               # half way between black and white
@@ -217,7 +232,9 @@ def test_presenter_view(app, deck):
     notes = img[int(0.52 * h):int(0.66 * h), int(0.62 * w):int(0.98 * w)]
     assert (np.abs(notes.astype(int) - bg).sum(-1) > 200).sum() > 50
 
-    c.key(Qt.Key.Key_Space)                                # click: now "next" is slide 2 (white)
+    c.key(Qt.Key.Key_Space)                                # the dot
+    c.key(Qt.Key.Key_Space)                                # the square's motion ...
+    clock.t = 1.0                                          # ... done: now "next" is slide 2 (white)
     img = presenter_image(c)
     assert (img[150:300, 820:1150] > 250).all()
     c.key(Qt.Key.Key_Right)

@@ -87,6 +87,9 @@ class Controller:
         if isinstance(current, Blend):
             moves.insert(0, (current.a, current.b, current.effect, current.direction, current.progress))
         for a, b, effect, direction, progress in moves:
+            if effect.kind == "timeline":
+                keys += [("composite", a), ("composite", b), ("background", b.slide)]
+                continue
             if effect.clip is None:
                 keys += [("composite", a), ("composite", b)]
                 continue
@@ -104,6 +107,19 @@ class Controller:
 
     def overlay(self, pos: Pos):
         return self.images.overlay(pos)
+
+    def slide_info(self, slide: int):
+        return self.deck.slides[slide]
+
+    def background(self, slide: int):
+        return self.images.background(slide)
+
+    def layers(self, slide: int):
+        return self.images.layers(slide)
+
+    @property
+    def canvas(self) -> tuple[int, int]:
+        return self.deck.size
 
     def clip_background(self, s: Blend):
         """The movie frame for this progress; never waits for the decoder: when the

@@ -85,6 +85,7 @@ class Effect:
     """How the picture changes between two positions.
 
     kind: cut | fade | fade_color | push | cover | uncover | wipe | clip
+          | timeline (the timed effects of a click step)
     """
     kind: str = "cut"
     duration: float = 0.0
@@ -97,6 +98,33 @@ class Effect:
         return self.kind == "cut" or self.duration <= 0
 
 
+@dataclass(frozen=True)
+class Event:
+    """A timed effect on an animated object, within a click step."""
+    unit: str
+    kind: str                        # show | hide | fade_in | fade_out | motion
+    start: float
+    duration: float
+    points: tuple = ()               # motion: offsets in canvas pixels, at even distances along the path
+    accelerate: float = 0.0
+    decelerate: float = 0.0
+
+
+@dataclass(frozen=True)
+class Step:
+    auto: bool                       # plays by itself (effects before the first click)
+    duration: float
+    events: tuple[Event, ...]
+
+
+@dataclass(frozen=True)
+class Layer:
+    path: Path
+    x: int                           # top-left corner in canvas pixels
+    y: int
+    unit: str | None                 # None: static content
+
+
 @dataclass
 class DeckSlide:
     number: int                      # Impress slide number (1-based)
@@ -104,14 +132,20 @@ class DeckSlide:
     hidden: bool
     notes: str
     background: Path
-    overlays: list[Path]
-    step_effects: list[Effect]       # step_effects[k]: entering step k (k = 0 unused)
+    layers: list[Layer]              # stacking order
+    units_visible: dict[str, bool]   # animated objects visible before any effect
+    steps: list[Step]                # steps[k]: what happens when entering click step k (k = 0: nothing)
     transition: Effect               # entering this slide
     raw_transition: dict = field(default_factory=dict)
 
     @property
     def n_steps(self) -> int:
-        return len(self.overlays)
+        return len(self.steps)
+
+    @property
+    def step_effects(self) -> list[Effect]:
+        """How the timeline sees each step: timed effects, or an instant change."""
+        return [Effect("timeline", st.duration) if st.duration >= 0.01 else Effect() for st in self.steps]
 
 
 @dataclass(frozen=True)
@@ -132,6 +166,8 @@ class Deck:
     def load(cls, manifest_path: Path) -> Deck:
         manifest_path = Path(manifest_path)
         data = json.loads(manifest_path.read_text())
+        if data.get("format", 1) < 2:
+            raise ValueError(f"{manifest_path} comes from an older crappy: rebuild it (crappy build -f)")
         root = manifest_path.parent
         movies = {mid: MovieInfo(root / m["video"], m["first"], m["count"])
                   for mid, m in data.get("movies", {}).items()}
@@ -145,12 +181,16 @@ class Deck:
                 transition = Effect("fade", min(t.get("duration", CLIP_FALLBACK_MAX), CLIP_FALLBACK_MAX))
             else:
                 transition = Effect(t["kind"], t.get("duration", 0.0), t.get("side"), t.get("color"))
+            steps = [Step(st["auto"], st["duration"], tuple(
+                Event(e["unit"], e["kind"], e["start"], e["duration"], tuple(map(tuple, e.get("points", ()))),
+                      e.get("accelerate", 0.0), e.get("decelerate", 0.0)) for e in st["events"]))
+                for st in s["steps"]]
             slides.append(DeckSlide(
                 number=s["number"], name=s["name"], hidden=s["hidden"], notes=s.get("notes", ""),
                 background=root / s["background"],
-                overlays=[root / st["overlay"] for st in s["steps"]],
-                step_effects=[Effect(st["effect"]["kind"], st["effect"]["duration"]) for st in s["steps"]],
-                transition=transition, raw_transition=t,
+                layers=[Layer(root / la["file"], la["x"], la["y"], la["unit"]) for la in s["layers"]],
+                units_visible={u: v["visible"] for u, v in s.get("units", {}).items()},
+                steps=steps, transition=transition, raw_transition=t,
             ))
         return cls(root, tuple(data["size"]), slides, movies)
 

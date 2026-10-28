@@ -69,9 +69,13 @@ after 2 s without movement.
 * Snapshot backgrounds: Slide Properties → Background → Image, *stretched*.
 * Slide transitions set in Impress are reproduced: cut, fade, fade through a
   colour, push, cover, uncover, wipe. Others fall back to a fade (with a warning).
-* Object animations: entrance and exit effects (on click / with previous /
-  after previous) become click steps. *Appear* is instant, any other effect is
-  shown as a fade. Emphasis and motion paths are ignored (with a warning).
+* Object animations: entrance and exit effects and **motion paths**, triggered
+  on click, with previous or after previous, with their **Delay** and duration.
+  *Appear* / *Disappear* are instant, any other entrance or exit is shown as a
+  fade of the same duration. A moved object stays where its path ends; a second
+  path continues from there. Effects set before the first click play by
+  themselves when the slide appears. Emphasis effects are ignored (with a
+  warning). Going back plays a click's effects in reverse.
 * A darkening layer over a snapshot: draw a semi-transparent black rectangle
   behind the text; its transparency is kept exactly.
 
@@ -138,6 +142,16 @@ kind = "fade_color"
 color = "#000000"
 duration = 1.5
 ```
+
+## How slides are rendered
+
+Every slide becomes a background and transparent layers, in stacking order:
+the master elements and the non-animated objects below the first animated one,
+then one layer per animated object (a shape, a paragraph, or the text of a
+shape) and the static objects between them. The player shows, fades and moves
+the animated layers following the effects' timing. All of it takes six
+LibreOffice exports, however many animations the talk has: animated objects
+are rendered alone on extra slides appended to a copy of the talk.
 
 ## How content transparency is obtained
 

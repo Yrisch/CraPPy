@@ -36,6 +36,13 @@ def cmd_info(args) -> int:
         bg = f"  bg={s.background_image.name}" if s.background_image else ""
         print(f"{s.number:3d}  {s.name[:40]:40}  steps={s.animation.n_steps}  in={t}{bg}"
               + ("  [hidden]" if s.hidden else ""))
+        for k, group in enumerate(s.animation.groups):
+            timed = s.animation.group_duration(k)
+            motions = sum(e.kind == "motion" for e in group)
+            if timed >= 0.01 or motions:
+                what = "plays when the slide appears" if k == 0 else f"click {k}"
+                print(f"       {what}: {len(group)} effect(s) over {timed:.2f} s"
+                      + (f", {motions} motion path(s)" if motions else ""))
         for w in s.warnings:
             print(f"       warning: {w}")
     for w in warnings:
