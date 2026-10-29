@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Yann Bernard <yannbernard13@gmail.com>
+# SPDX-License-Identifier: CECILL-2.1
+
 """`crappy build`: an .odp -> per-slide background + transparent content layers + effect timing.
 
 Render passes (each one a whole-document LibreOffice PDF export, run in parallel):

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Yann Bernard <yannbernard13@gmail.com>
+# SPDX-License-Identifier: CECILL-2.1
+
 """State of every animated object at a moment of a slide. No Qt in here.
 
 The state of a unit is (opacity, dx, dy): dx, dy its offset in canvas pixels

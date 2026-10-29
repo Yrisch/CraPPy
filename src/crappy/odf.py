@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Yann Bernard <yannbernard13@gmail.com>
+# SPDX-License-Identifier: CECILL-2.1
+
 """Minimal access to OpenDocument presentation packages (.odp).
 
 Only content.xml and styles.xml are parsed; every other member of the zip

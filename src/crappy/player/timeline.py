@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Yann Bernard <yannbernard13@gmail.com>
+# SPDX-License-Identifier: CECILL-2.1
+
 """Where the talk is, and what is on screen at a given time. No Qt in here.
 
 A position is (slide index, click step). Moving between two neighbouring

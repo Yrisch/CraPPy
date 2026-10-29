@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Yann Bernard <yannbernard13@gmail.com>
+# SPDX-License-Identifier: CECILL-2.1
+
 """A small hand-written presentation covering what the build has to handle.
 
 Slide 1 "dark":  solid black background, text in Automatic colour (-> white).

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Yann Bernard <yannbernard13@gmail.com>
+# SPDX-License-Identifier: CECILL-2.1
+
 """Transformations producing the document copies that LibreOffice renders.
 
 * set_page_backdrops: a slide's background becomes one solid colour

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Yann Bernard <yannbernard13@gmail.com>
+# SPDX-License-Identifier: CECILL-2.1
+
 """Is a slide background dark or light, as far as LibreOffice is concerned?
 
 Impress draws text with the "Automatic" font colour in white on a dark

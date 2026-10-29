@@ -168,3 +168,12 @@ differ by 255 in blue, the channel perceived brightness weighs least).
 The untouched talk is rendered as well and every rebuilt slide is compared with
 it; a slide that does not match is retried with the other pair of backdrops,
 and reported if it still differs.
+
+## License
+
+Copyright © 2026 Yann Bernard <yannbernard13@gmail.com>
+
+CraPPy is free software, distributed under the terms of the
+[CeCILL Free Software License Agreement, version 2.1](LICENSE)
+(GPL-compatible, governed by French law). See <https://cecill.info> for the
+French version and further information.

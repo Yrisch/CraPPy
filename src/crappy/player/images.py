@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Yann Bernard <yannbernard13@gmail.com>
+# SPDX-License-Identifier: CECILL-2.1
+
 """Slide pictures, prepared in worker threads (QPainter on a QImage is allowed there).
 
   ("composite", pos)    background + every layer as it is at the end of click step pos.step

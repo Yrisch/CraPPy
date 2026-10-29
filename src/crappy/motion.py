@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Yann Bernard <yannbernard13@gmail.com>
+# SPDX-License-Identifier: CECILL-2.1
+
 """Motion paths: SVG path data -> points at even distances, and SMIL timing.
 
 Impress writes a motion path as SVG path data in fractions of the slide size

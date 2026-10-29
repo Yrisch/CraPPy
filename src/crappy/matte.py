@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Yann Bernard <yannbernard13@gmail.com>
+# SPDX-License-Identifier: CECILL-2.1
+
 """Difference matting: recover a transparent layer from renders over two backdrops.
 
 A pixel of colour C and opacity a renders over a backdrop b as

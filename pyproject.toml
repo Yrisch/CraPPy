@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
@@ -8,6 +8,8 @@ version = "0.1.0"
 description = "LibreOffice slides composited over astrophysical simulation snapshots, with movie transitions"
 readme = "README.md"
 requires-python = ">=3.11"
+license = "CECILL-2.1"
+license-files = ["LICENSE"]
 authors = [{ name = "Yann Bernard", email = "yannbernard13@gmail.com" }]
 dependencies = [
     "lxml>=5",

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Yann Bernard <yannbernard13@gmail.com>
+# SPDX-License-Identifier: CECILL-2.1
+
 """Decoding movie frames for clip transitions.
 
 Movies are all-intra H.264 (see crappy.movie): every frame decodes on its own,
